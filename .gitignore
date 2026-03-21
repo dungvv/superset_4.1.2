@@ -121,3 +121,7 @@ docker/*local*
 
 # Jest test report
 test-report.html
+
+# Ignore static assets/assert
+static/assets
+static/assert
