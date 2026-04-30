@@ -1,0 +1,240 @@
+x-superset-image: &superset-image unitel/superset-chrome:update-Lao
+services:
+  superset:
+    image: *superset-image
+    container_name: superset_app
+    command: [ "/app/docker/docker-bootstrap.sh", "app-gunicorn" ]
+    env_file: .env
+    environment:
+      # - SUPERSET_WEBSERVER_WORKERS=16        # s? worker
+      # - SUPERSET_WEBSERVER_THREADS=4         # s? thread m?i worker
+      # - SUPERSET_WEBSERVER_TIMEOUT=600       # timeout request
+      - SERVER_WORKER_AMOUNT=8
+      - SERVER_THREADS_AMOUNT=10
+      - GUNICORN_TIMEOUT=600
+      - GUNICORN_KEEPALIVE=2
+      - SUPERSET_CONFIG_PATH=/app/superset_config.py #modified 23/10
+      - WEBDRIVER_TYPE= chrome
+      - SCREENSHOT_SELENIUM_WEBDRIVER= chrome
+      - TZ=Asia/Ho_Chi_Minh
+    networks:
+      - superset-net
+    restart: unless-stopped
+    ports:
+      - 80:8088
+    volumes:
+      - ./superset_config.py:/app/superset_config.py
+      - ./superset_custom_auth.py:/app/superset_custom_auth.py
+      - ./superset/charts/post_processing.py:/app/superset/charts/post_processing.py
+      - ./superset/charts/data/api.py:/app/superset/charts/data/api.py
+      - ./superset/common/query_context_processor.py:/app/superset/common/query_context_processor.py
+      - ./superset/utils/excel.py:/app/superset/utils/excel.py
+      - ./superset/reports/notifications/email.py:/app/superset/reports/notifications/email.py
+      - ./superset/utils/csv.py:/app/superset/utils/csv.py
+      - ./superset/static/assets:/app/superset/static/assets
+      - ./superset/reports/notifications/base.py:/app/superset/reports/notifications/base.py
+      - ./superset/commands/report/execute.py:/app/superset/commands/report/execute.py
+      - ./superset/utils/filename_utils.py:/app/superset/utils/filename_utils.py
+
+  superset-daily-restart:
+    image: alpine:3.20
+    container_name: superset_daily_restart
+    environment:
+      - TZ=Asia/Bangkok
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: >
+      sh -ce '
+        apk add --no-cache curl dcron tzdata &&
+        echo "15 6 * * * /usr/bin/curl --fail --silent --show-error --unix-socket /var/run/docker.sock -X POST http://localhost/containers/superset_app/restart" > /etc/crontabs/root &&
+        crond -f -l 8
+      '
+    restart: unless-stopped
+    networks:
+      - superset-net
+
+  superset-worker-sqllab:
+    image: *superset-image
+    deploy:
+      mode: replicated
+      replicas: 1
+    # Command specifies queue: sql_lab
+    command: [ "celery", "--app=superset.tasks.celery_app:app", "worker", "--pool=prefork", "-O", "fair", "-c", "4", "--queues=sql_lab" ]
+    env_file: .env
+    environment:
+      - SUPERSET_CONFIG_PATH=/app/superset_config.py #modified 23/10
+      - WEBDRIVER_TYPE= chrome
+      - SCREENSHOT_SELENIUM_WEBDRIVER= chrome
+      - TZ=Asia/Ho_Chi_Minh
+    networks:
+      - superset-net
+    restart: unless-stopped
+    shm_size: '1gb'
+    volumes:
+      - ./superset_config.py:/app/superset_config.py
+      - ./superset_custom_auth.py:/app/superset_custom_auth.py
+      - ./superset/charts/post_processing.py:/app/superset/charts/post_processing.py
+      - ./superset/charts/data/api.py:/app/superset/charts/data/api.py
+      - ./superset/common/query_context_processor.py:/app/superset/common/query_context_processor.py
+      - ./superset/utils/excel.py:/app/superset/utils/excel.py
+      - ./superset/reports/notifications/email.py:/app/superset/reports/notifications/email.py
+      - ./superset/utils/csv.py:/app/superset/utils/csv.py
+      - ./superset/static/assets:/app/superset/static/assets
+      - ./superset/reports/notifications/base.py:/app/superset/reports/notifications/base.py
+      - ./superset/commands/report/execute.py:/app/superset/commands/report/execute.py
+      - ./superset/utils/filename_utils.py:/app/superset/utils/filename_utils.py
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    healthcheck:
+      test: [ "CMD-SHELL", "celery -A superset.tasks.celery_app:app inspect ping -d celery@$$HOSTNAME" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  superset-worker-reports:
+    image: *superset-image
+    deploy:
+      mode: replicated
+      replicas: 3
+    # Command specifies queues: reports,default
+    command: [ "celery", "--app=superset.tasks.celery_app:app", "worker", "--pool=prefork", "-O", "fair", "-c", "4", "--queues=reports,default", "--loglevel=INFO" ]
+    env_file: .env
+    environment:
+      - SUPERSET_CONFIG_PATH=/app/superset_config.py #modified 23/10
+      - WEBDRIVER_TYPE= chrome
+      - SCREENSHOT_SELENIUM_WEBDRIVER= chrome
+      - TZ=Asia/Ho_Chi_Minh
+    networks:
+      - superset-net
+    restart: unless-stopped
+    shm_size: '2gb' # Chrome needs more shared memory
+    volumes:
+      - ./superset_config.py:/app/superset_config.py
+      - ./superset_custom_auth.py:/app/superset_custom_auth.py
+      - ./superset/charts/post_processing.py:/app/superset/charts/post_processing.py
+      - ./superset/charts/data/api.py:/app/superset/charts/data/api.py
+      - ./superset/common/query_context_processor.py:/app/superset/common/query_context_processor.py
+      - ./superset/utils/excel.py:/app/superset/utils/excel.py
+      - ./superset/reports/notifications/email.py:/app/superset/reports/notifications/email.py
+      - ./superset/utils/csv.py:/app/superset/utils/csv.py
+      - ./superset/static/assets:/app/superset/static/assets
+      - ./superset/reports/notifications/base.py:/app/superset/reports/notifications/base.py
+      - ./superset/commands/report/execute.py:/app/superset/commands/report/execute.py
+      - ./superset/utils/filename_utils.py:/app/superset/utils/filename_utils.py
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    mem_limit: 3g
+    memswap_limit: 3g
+    healthcheck:
+      test: [ "CMD-SHELL", "celery -A superset.tasks.celery_app:app inspect ping -d celery@$$HOSTNAME" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  superset-worker-cache:
+    image: *superset-image
+    deploy:
+      mode: replicated
+      replicas: 1
+    # Command specifies queues: thumbnails,cache
+    command: [ "celery", "--app=superset.tasks.celery_app:app", "worker", "--pool=prefork", "-O", "fair", "-c", "4", "--queues=thumbnails,cache" ]
+    env_file: .env
+    environment:
+      - SUPERSET_CONFIG_PATH=/app/superset_config.py #modified 23/10
+      - WEBDRIVER_TYPE= chrome
+      - SCREENSHOT_SELENIUM_WEBDRIVER= chrome
+      - TZ=Asia/Ho_Chi_Minh
+    networks:
+      - superset-net
+    restart: unless-stopped
+    shm_size: '2gb'
+    volumes:
+      - ./superset_config.py:/app/superset_config.py
+      - ./superset_custom_auth.py:/app/superset_custom_auth.py
+      - ./superset/charts/post_processing.py:/app/superset/charts/post_processing.py
+      - ./superset/charts/data/api.py:/app/superset/charts/data/api.py
+      - ./superset/common/query_context_processor.py:/app/superset/common/query_context_processor.py
+      - ./superset/utils/excel.py:/app/superset/utils/excel.py
+      - ./superset/reports/notifications/email.py:/app/superset/reports/notifications/email.py
+      - ./superset/utils/csv.py:/app/superset/utils/csv.py
+      - ./superset/static/assets:/app/superset/static/assets
+      - ./superset/reports/notifications/base.py:/app/superset/reports/notifications/base.py
+      - ./superset/commands/report/execute.py:/app/superset/commands/report/execute.py
+      - ./superset/utils/filename_utils.py:/app/superset/utils/filename_utils.py
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    healthcheck:
+      test: [ "CMD-SHELL", "celery -A superset.tasks.celery_app:app inspect ping -d celery@$$HOSTNAME" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  superset-worker-beat:
+    image: *superset-image
+    container_name: superset_worker_beat
+    command: [ "/app/docker/docker-bootstrap.sh", "beat" ]
+    env_file: .env
+    environment:
+      - SUPERSET_CONFIG_PATH=/app/superset_config.py
+      - WEBDRIVER_TYPE= chrome
+      - SCREENSHOT_SELENIUM_WEBDRIVER= chrome
+      - TZ=Asia/Ho_Chi_Minh
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    networks:
+      - superset-net
+    restart: unless-stopped
+    healthcheck:
+      disable: true
+    volumes:
+      - ./superset/charts/data/api.py:/app/superset/charts/data/api.py
+      - ./superset/charts/post_processing.py:/app/superset/charts/post_processing.py
+      - ./superset/common/query_context_processor.py:/app/superset/common/query_context_processor.py
+      - ./superset/utils/excel.py:/app/superset/utils/excel.py
+      - ./superset_config.py:/app/superset_config.py
+      - ./superset_custom_auth.py:/app/superset_custom_auth.py
+      - ./superset/reports/notifications/email.py:/app/superset/reports/notifications/email.py
+      - ./superset/utils/csv.py:/app/superset/utils/csv.py
+      - ./superset/static/assets:/app/superset/static/assets
+      - ./superset/reports/notifications/base.py:/app/superset/reports/notifications/base.py
+      - ./superset/commands/report/execute.py:/app/superset/commands/report/execute.py
+      - ./superset/utils/filename_utils.py:/app/superset/utils/filename_utils.py
+
+  superset-worker-flower:
+    image: *superset-image
+    container_name: superset_worker_flower
+    command: [ "/app/docker/docker-bootstrap.sh", "flower" ]
+    env_file: .env
+    environment:
+      - SUPERSET_CONFIG_PATH=/app/superset_config.py
+      - WEBDRIVER_TYPE= chrome
+      - SCREENSHOT_SELENIUM_WEBDRIVER= chrome
+      - TZ=Asia/Ho_Chi_Minh
+    ports:
+      - 8081:5555
+    networks:
+      - superset-net
+    restart: unless-stopped
+    healthcheck:
+      disable: true
+    volumes:
+      - ./superset/charts/data/api.py:/app/superset/charts/data/api.py
+      - ./superset/common/query_context_processor.py:/app/superset/common/query_context_processor.py
+      - ./superset/charts/post_processing.py:/app/superset/charts/post_processing.py
+      - ./superset/utils/excel.py:/app/superset/utils/excel.py
+      - ./superset_config.py:/app/superset_config.py
+      - ./superset_custom_auth.py:/app/superset_custom_auth.py
+      - ./superset/reports/notifications/email.py:/app/superset/reports/notifications/email.py
+      - ./superset/utils/csv.py:/app/superset/utils/csv.py
+      - ./superset/static/assets:/app/superset/static/assets
+      - ./superset/reports/notifications/base.py:/app/superset/reports/notifications/base.py
+      - ./superset/commands/report/execute.py:/app/superset/commands/report/execute.py
+      - ./superset/utils/filename_utils.py:/app/superset/utils/filename_utils.py
+
+networks:
+  superset-net:
+    name: superset_net

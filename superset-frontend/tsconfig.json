@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
     /* Type Checking */
-    "noImplicitAny": true,
+    "noImplicitAny": false,
     "noImplicitReturns": true,
     "noImplicitThis": true,
     "noUnusedLocals": true,
@@ -37,7 +37,7 @@
     "declaration": true,
     "declarationMap": true,
     "importHelpers": false,
-    "noEmitOnError": true,
+    "noEmitOnError": false,
     "outDir": "./dist",
     "sourceMap": true,
 

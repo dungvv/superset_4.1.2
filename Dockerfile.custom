@@ -1,0 +1,23 @@
+FROM unitel/superset-chrome:update-Lao
+USER root
+
+# 1. Chép đè thư mục Frontend đã Build (Phải npm run build trước khi chạy Dockerfile này)
+COPY --chown=superset:superset superset/static/assets /app/superset/static/assets
+
+# 2. Chép đè toàn bộ các file Backend .py liên quan đến Logic Export & Email (Gồm cả file mới tạo filename_utils.py)
+COPY --chown=superset:superset superset/utils/filename_utils.py /app/superset/utils/filename_utils.py
+COPY --chown=superset:superset superset/utils/excel.py /app/superset/utils/excel.py
+COPY --chown=superset:superset superset/utils/csv.py /app/superset/utils/csv.py
+COPY --chown=superset:superset superset/reports/notifications/base.py /app/superset/reports/notifications/base.py
+COPY --chown=superset:superset superset/reports/notifications/email.py /app/superset/reports/notifications/email.py
+COPY --chown=superset:superset superset/commands/report/execute.py /app/superset/commands/report/execute.py
+
+# 3. Chép đè các file cấu hình và API data phụ trợ (Dựa theo compose Local của bạn)
+COPY --chown=superset:superset superset/common/query_context_processor.py /app/superset/common/query_context_processor.py
+COPY --chown=superset:superset superset/charts/data/api.py /app/superset/charts/data/api.py
+COPY --chown=superset:superset superset/charts/post_processing.py /app/superset/charts/post_processing.py
+COPY --chown=superset:superset superset_config.py /app/superset_config.py
+COPY --chown=superset:superset superset_custom_auth.py /app/superset_custom_auth.py
+
+# Back lại user mặc định của superset
+USER superset

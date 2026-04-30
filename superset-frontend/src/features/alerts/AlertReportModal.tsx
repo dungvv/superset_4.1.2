@@ -1169,11 +1169,11 @@ const AlertReportModal: FunctionComponent<AlertReportModalProps> = ({
         ...defaultAlert,
         owners: currentUser
           ? [
-              {
-                value: currentUser.userId,
-                label: `${currentUser.firstName} ${currentUser.lastName}`,
-              },
-            ]
+            {
+              value: currentUser.userId,
+              label: `${currentUser.firstName} ${currentUser.lastName}`,
+            },
+          ]
           : [],
       });
       setNotificationSettings([
@@ -1237,21 +1237,21 @@ const AlertReportModal: FunctionComponent<AlertReportModalProps> = ({
         ...resource,
         chart: resource.chart
           ? getChartData(resource.chart) || {
-              value: (resource.chart as ChartObject).id,
-              label: (resource.chart as ChartObject).slice_name,
-            }
+            value: (resource.chart as ChartObject).id,
+            label: (resource.chart as ChartObject).slice_name,
+          }
           : undefined,
         dashboard: resource.dashboard
           ? getDashboardData(resource.dashboard) || {
-              value: (resource.dashboard as DashboardObject).id,
-              label: (resource.dashboard as DashboardObject).dashboard_title,
-            }
+            value: (resource.dashboard as DashboardObject).id,
+            label: (resource.dashboard as DashboardObject).dashboard_title,
+          }
           : undefined,
         database: resource.database
           ? getSourceData(resource.database) || {
-              value: (resource.database as DatabaseObject).id,
-              label: (resource.database as DatabaseObject).database_name,
-            }
+            value: (resource.database as DatabaseObject).id,
+            label: (resource.database as DatabaseObject).database_name,
+          }
           : undefined,
         owners: (alert?.owners || []).map(owner => ({
           value: (owner as MetaObject).value || owner.id,
@@ -1263,8 +1263,8 @@ const AlertReportModal: FunctionComponent<AlertReportModalProps> = ({
         validator_config_json:
           resource.validator_type === 'not null'
             ? {
-                op: 'not null',
-              }
+              op: 'not null',
+            }
             : validatorConfig,
       });
     }
@@ -1371,6 +1371,9 @@ const AlertReportModal: FunctionComponent<AlertReportModalProps> = ({
       primaryButtonName={isEditMode ? t('Save') : t('Add')}
       show={show}
       width="500px"
+      css={css`
+        top: -400px;
+      `}
       centered
       title={<h4 data-test="alert-report-modal-title">{getTitleText()}</h4>}
     >
@@ -1493,11 +1496,11 @@ const AlertReportModal: FunctionComponent<AlertReportModalProps> = ({
                   placeholder={t('Select database')}
                   value={
                     currentAlert?.database?.label &&
-                    currentAlert?.database?.value
+                      currentAlert?.database?.value
                       ? {
-                          value: currentAlert.database.value,
-                          label: currentAlert.database.label,
-                        }
+                        value: currentAlert.database.value,
+                        label: currentAlert.database.label,
+                      }
                       : undefined
                   }
                   options={loadSourceOptions}
@@ -1611,9 +1614,9 @@ const AlertReportModal: FunctionComponent<AlertReportModalProps> = ({
                   value={
                     currentAlert?.chart?.label && currentAlert?.chart?.value
                       ? {
-                          value: currentAlert.chart.value,
-                          label: currentAlert.chart.label,
-                        }
+                        value: currentAlert.chart.value,
+                        label: currentAlert.chart.label,
+                      }
                       : undefined
                   }
                   options={loadChartOptions}
@@ -1632,11 +1635,11 @@ const AlertReportModal: FunctionComponent<AlertReportModalProps> = ({
                   name="dashboard"
                   value={
                     currentAlert?.dashboard?.label &&
-                    currentAlert?.dashboard?.value
+                      currentAlert?.dashboard?.value
                       ? {
-                          value: currentAlert.dashboard.value,
-                          label: currentAlert.dashboard.label,
-                        }
+                        value: currentAlert.dashboard.value,
+                        label: currentAlert.dashboard.label,
+                      }
                       : undefined
                   }
                   options={loadDashboardOptions}
@@ -1666,7 +1669,7 @@ const AlertReportModal: FunctionComponent<AlertReportModalProps> = ({
                       ? ['pdf', 'png'].map(key => FORMAT_OPTIONS[key])
                       : /* If chart is of text based viz type: show text
                   format option */
-                        TEXT_BASED_VISUALIZATION_TYPES.includes(chartVizType)
+                      TEXT_BASED_VISUALIZATION_TYPES.includes(chartVizType)
                         ? Object.values(FORMAT_OPTIONS)
                         : ['pdf', 'png', 'csv'].map(key => FORMAT_OPTIONS[key])
                   }

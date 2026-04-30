@@ -36,10 +36,9 @@ import TimezoneSelector from 'src/components/TimezoneSelector';
 import LabeledErrorBoundInput from 'src/components/Form/LabeledErrorBoundInput';
 import Icons from 'src/components/Icons';
 import { CronError } from 'src/components/CronPicker';
-import { RadioChangeEvent } from 'src/components';
+import { RadioChangeEvent, AntdCheckbox } from 'src/components';
 import { Input } from 'src/components/Input';
 import withToasts from 'src/components/MessageToasts/withToasts';
-import { AntdCheckbox } from 'src/components';
 import { ChartState } from 'src/explore/types';
 import {
   ReportCreationMethod,

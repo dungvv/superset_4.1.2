@@ -120,36 +120,44 @@ class EmailNotification(BaseNotification):  # pylint: disable=too-few-public-met
         import pandas as pd
         import io
         
-        target_date = datetime.now(tz) - timedelta(days=1)
+        target_date = datetime.now(tz)
         default_date_str = target_date.strftime("%d-%m-%Y")
         
+        def _get_date_from_df(df) -> Optional[str]:
+            # Priority 1: Exact matches
+            exact_columns = ['BUSINESS_DATE', 'DATE', 'date', 'business_date']
+            for col in exact_columns:
+                if col in df.columns:
+                    val = df[col].dropna().first_valid_index()
+                    if val is not None:
+                        b_date = df.loc[val, col]
+                        parsed_date = pd.to_datetime(b_date, errors='coerce')
+                        if pd.notnull(parsed_date):
+                            return parsed_date.strftime("%d-%m-%Y")
+
+            # Priority 2: Substring matches containing 'Date', 'date', or 'DATE'
+            for col in df.columns:
+                str_col = str(col)
+                if 'Date' in str_col or 'date' in str_col or 'DATE' in str_col:
+                    val = df[col].dropna().first_valid_index()
+                    if val is not None:
+                        b_date = df.loc[val, col]
+                        parsed_date = pd.to_datetime(b_date, errors='coerce')
+                        if pd.notnull(parsed_date):
+                            return parsed_date.strftime("%d-%m-%Y")
+            return None
+
         try:
-            date_columns = ['Date', 'date', 'business_date', 'BUSINESS_DATE']
-            # Check embedded data (HTML tables)
             if self._content.embedded_data is not None:
-                df = self._content.embedded_data
-                for col in date_columns:
-                    if col in df.columns:
-                        val = df[col].dropna().first_valid_index()
-                        if val is not None:
-                            b_date = df.loc[val, col]
-                            if isinstance(b_date, str):
-                                return pd.to_datetime(b_date).strftime("%d-%m-%Y")
-                            elif isinstance(b_date, (datetime, pd.Timestamp)):
-                                return b_date.strftime("%d-%m-%Y")
+                res = _get_date_from_df(self._content.embedded_data)
+                if res:
+                    return res
             
-            # Check CSV data
             if self._content.csv:
                 df = pd.read_csv(io.BytesIO(self._content.csv), nrows=5)
-                for col in date_columns:
-                    if col in df.columns:
-                        val = df[col].dropna().first_valid_index()
-                        if val is not None:
-                            b_date = df.loc[val, col]
-                            if isinstance(b_date, str):
-                                return pd.to_datetime(b_date).strftime("%d-%m-%Y")
-                            elif isinstance(b_date, (datetime, pd.Timestamp)):
-                                return b_date.strftime("%d-%m-%Y")
+                res = _get_date_from_df(df)
+                if res:
+                    return res
         except Exception as e:
             logger.warning("Failed to extract date from report data: %s", e)
             

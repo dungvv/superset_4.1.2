@@ -78,7 +78,7 @@ export const styleControlSetItem: ControlSetItem = {
 
     validators: [],
     mapStateToProps: ({ controls }) => ({
-      value: controls?.handlebars_template?.value,
+      value: controls?.styleTemplate?.value,
     }),
   },
 };

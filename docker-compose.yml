@@ -31,7 +31,7 @@ services:
       - ./superset/reports/notifications/base.py:/app/superset/reports/notifications/base.py
       - ./superset/commands/report/execute.py:/app/superset/commands/report/execute.py
       - ./superset/utils/csv.py:/app/superset/utils/csv.py
-      #      - ./superset/static/assets:/app/superset/static/assets
+      - ./superset/static/assets:/app/superset/static/assets
       - ./docker/docker-bootstrap.sh:/app/docker/docker-bootstrap.sh
       - ./docker/requirements-local.txt:/app/docker/requirements-local.txt
 
@@ -91,7 +91,7 @@ services:
       - ./superset/reports/notifications/base.py:/app/superset/reports/notifications/base.py
       - ./superset/commands/report/execute.py:/app/superset/commands/report/execute.py
       - ./superset/utils/csv.py:/app/superset/utils/csv.py
-      #      - ./superset/static/assets:/app/superset/static/assets
+      - ./superset/static/assets:/app/superset/static/assets
       - ./docker/docker-bootstrap.sh:/app/docker/docker-bootstrap.sh
       - ./docker/requirements-local.txt:/app/docker/requirements-local.txt
     healthcheck:
@@ -124,7 +124,7 @@ services:
       - ./superset/reports/notifications/base.py:/app/superset/reports/notifications/base.py
       - ./superset/commands/report/execute.py:/app/superset/commands/report/execute.py
       - ./superset/utils/csv.py:/app/superset/utils/csv.py
-      #      - ./superset/static/assets:/app/superset/static/assets
+      - ./superset/static/assets:/app/superset/static/assets
       - ./docker/docker-bootstrap.sh:/app/docker/docker-bootstrap.sh
       - ./docker/requirements-local.txt:/app/docker/requirements-local.txt
     healthcheck:
@@ -155,7 +155,7 @@ services:
       - ./superset/reports/notifications/base.py:/app/superset/reports/notifications/base.py
       - ./superset/commands/report/execute.py:/app/superset/commands/report/execute.py
       - ./superset/utils/csv.py:/app/superset/utils/csv.py
-      #      - ./superset/static/assets:/app/superset/static/assets
+      - ./superset/static/assets:/app/superset/static/assets
       - ./docker/docker-bootstrap.sh:/app/docker/docker-bootstrap.sh
       - ./docker/requirements-local.txt:/app/docker/requirements-local.txt
     healthcheck:
