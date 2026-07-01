@@ -28,7 +28,18 @@ export const DTTM_ALIAS = '__timestamp';
 export const NO_TIME_RANGE = 'No filter';
 
 export const EXTRA_FORM_DATA_OVERRIDE_EXTRA_KEYS: (keyof ExtraFormDataOverrideExtras)[] =
-  ['relative_start', 'relative_end', 'time_grain_sqla'];
+  [
+    'relative_start',
+    'relative_end',
+    'comparison_time_range',
+    'current_start_date',
+    'current_end_date',
+    'comparison_start_date',
+    'comparison_end_date',
+    'time_group',
+    'time_grain_sqla',
+    'time_range_params',
+  ];
 
 export const EXTRA_FORM_DATA_APPEND_KEYS: (keyof ExtraFormDataAppend)[] = [
   'adhoc_filters',

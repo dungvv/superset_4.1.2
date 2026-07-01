@@ -143,6 +143,18 @@ const plugins = [
   }),
 ];
 
+plugins.push(
+  new webpack.NormalModuleReplacementPlugin(
+    /core-js\/modules\/es6\./,
+    resource => {
+      resource.request = resource.request.replace(
+        /core-js\/modules\//,
+        'core-js-2/modules/',
+      );
+    },
+  ),
+);
+
 if (!process.env.CI) {
   plugins.push(new webpack.ProgressPlugin());
 }
@@ -321,8 +333,8 @@ const config = {
         ),
       ),
       'core-js/library': path.resolve(APP_DIR, 'node_modules/core-js-2/library'),
-      'core-js/modules': path.resolve(APP_DIR, 'node_modules/core-js-2/modules'),
       'core-js/fn': path.resolve(APP_DIR, 'node_modules/core-js-2/fn'),
+      'core-js-2/modules': path.resolve(APP_DIR, 'node_modules/core-js-2/modules'),
     },
     extensions: ['.ts', '.tsx', '.js', '.jsx', '.yml'],
     fallback: {

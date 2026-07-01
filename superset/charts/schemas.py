@@ -992,6 +992,49 @@ class ChartDataExtrasSchema(Schema):
         },
         allow_none=True,
     )
+    comparison_time_range = fields.String(
+        metadata={
+            "description": "Comparison time range value",
+        },
+        allow_none=True,
+    )
+    current_start_date = fields.String(
+        metadata={
+            "description": "Current period start date",
+        },
+        allow_none=True,
+    )
+    current_end_date = fields.String(
+        metadata={
+            "description": "Current period end date",
+        },
+        allow_none=True,
+    )
+    comparison_start_date = fields.String(
+        metadata={
+            "description": "Comparison period start date",
+        },
+        allow_none=True,
+    )
+    comparison_end_date = fields.String(
+        metadata={
+            "description": "Comparison period end date",
+        },
+        allow_none=True,
+    )
+    time_group = fields.String(
+        metadata={
+            "description": "Time group granularity (day or month)",
+        },
+        allow_none=True,
+    )
+    time_range_params = fields.String(
+        metadata={
+            "description": "Packed time range params from Time Filter "
+            "(current|comparison|time_group)",
+        },
+        allow_none=True,
+    )
 
 
 class AnnotationLayerSchema(Schema):

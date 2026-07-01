@@ -17,12 +17,15 @@
 # pylint: disable=too-many-lines
 import functools
 import logging
+import re
+import unicodedata
 from datetime import datetime
 from io import BytesIO
 from typing import Any, Callable, cast, Optional
+from urllib.parse import quote
 from zipfile import is_zipfile, ZipFile
 
-from flask import g, redirect, request, Response, send_file, url_for
+from flask import current_app, g, redirect, request, Response, send_file, url_for
 from flask_appbuilder import permission_name
 from flask_appbuilder.api import expose, protect, rison, safe
 from flask_appbuilder.hooks import before_request
@@ -71,6 +74,12 @@ from superset.dashboards.filters import (
     DashboardTagNameFilter,
     DashboardTitleOrSlugFilter,
     FilterRelatedRoles,
+)
+from superset.dashboards.word_export import (
+    DOCX_CONTENT_TYPE,
+    build_default_word_document,
+    build_template_word_document,
+    is_template_dashboard,
 )
 from superset.dashboards.permalink.types import DashboardPermalinkState
 from superset.dashboards.schemas import (
@@ -122,6 +131,25 @@ from superset.views.filters import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _build_docx_content_disposition(filename: str) -> str:
+    cleaned_filename = (
+        re.sub(r'[\r\n"\\]+', "_", filename).strip() or "dashboard.docx"
+    )
+    ascii_filename = (
+        unicodedata.normalize("NFKD", cleaned_filename)
+        .encode("ascii", "ignore")
+        .decode("ascii")
+    )
+    ascii_filename = re.sub(r"[^A-Za-z0-9._-]+", "_", ascii_filename).strip("._")
+    if not ascii_filename:
+        ascii_filename = "dashboard.docx"
+
+    return (
+        f'attachment; filename="{ascii_filename}"; '
+        f"filename*=UTF-8''{quote(cleaned_filename)}"
+    )
 
 
 def with_dashboard(
@@ -179,6 +207,7 @@ class DashboardRestApi(BaseSupersetModelRestApi):
         "copy_dash",
         "cache_dashboard_screenshot",
         "screenshot",
+        "export_word",
     }
     resource_name = "dashboard"
     allow_browser_login = True
@@ -1647,3 +1676,191 @@ class DashboardRestApi(BaseSupersetModelRestApi):
                 ).timestamp(),
             },
         )
+
+    @expose("/<id_or_slug>/export_word/", methods=("POST",))
+    @protect()
+    @safe
+    @permission_name("read")
+    @statsd_metrics
+    def export_word(self, id_or_slug: str, **kwargs: Any) -> WerkzeugResponse:
+        """Export dashboard to a Word document.
+        ---
+        post:
+          summary: Export dashboard to Word
+          description: >-
+            Accepts chart screenshot images (base64 data URIs) with their
+            grid positions and generates a downloadable Word document.
+          requestBody:
+            required: true
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    charts:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          image:
+                            type: string
+                            description: Base64 data URI of the chart screenshot
+                          name:
+                            type: string
+                            description: Chart name for template placeholders
+                          row:
+                            type: integer
+                            description: Grid row position
+                          col:
+                            type: integer
+                            description: Grid column position
+                          width:
+                            type: integer
+                            description: Chart width (px)
+                          height:
+                            type: integer
+                            description: Chart height (px)
+                    dashboard_title:
+                      type: string
+                    current_start_date:
+                      type: string
+                      description: Current period start date for Word template placeholders
+                    current_end_date:
+                      type: string
+                      description: Current period end date for Word template placeholders
+          responses:
+            200:
+              description: Word document binary
+              content:
+                application/vnd.openxmlformats-officedocument.wordprocessingml.document:
+                  schema:
+                    type: string
+                    format: binary
+            400:
+              $ref: '#/components/responses/400'
+            500:
+              $ref: '#/components/responses/500'
+        """
+        try:
+            data = request.json
+            if not data or not data.get("charts"):
+                return self.response_400(message="No charts provided")
+
+            charts = data["charts"]
+            dashboard_title = data.get("dashboard_title", "Dashboard Export")
+            kpi_counts = data.get("kpi_counts") or {}
+            template_context = {
+                "start_date": data.get("start_date")
+                or data.get("current_start_date", ""),
+                "end_date": data.get("end_date") or data.get("current_end_date", ""),
+                "current_start_date": data.get("current_start_date", ""),
+                "current_end_date": data.get("current_end_date", ""),
+                "report_type": data.get("report_type", ""),
+                "report_month": data.get("report_month", ""),
+                "kpi_total": data.get(
+                    "kpi_total",
+                    kpi_counts.get("kpi_total", ""),
+                ),
+                "kpi_common_total": data.get(
+                    "kpi_common_total",
+                    kpi_counts.get("kpi_common_total", ""),
+                ),
+                "kpi_common_passed": data.get(
+                    "kpi_common_passed",
+                    kpi_counts.get("kpi_common_passed", ""),
+                ),
+                "kpi_common_failed": data.get(
+                    "kpi_common_failed",
+                    kpi_counts.get("kpi_common_failed", ""),
+                ),
+                "kpi_common_no_data": data.get(
+                    "kpi_common_no_data",
+                    kpi_counts.get("kpi_common_no_data", ""),
+                ),
+                "kpi_common_not_passed": data.get(
+                    "kpi_common_not_passed",
+                    kpi_counts.get("kpi_common_not_passed", ""),
+                ),
+                "kpi_common_passed_rate": data.get(
+                    "kpi_common_passed_rate",
+                    kpi_counts.get("kpi_common_passed_rate", ""),
+                ),
+                "kpi_key_total": data.get(
+                    "kpi_key_total",
+                    kpi_counts.get("kpi_key_total", ""),
+                ),
+                "kpi_key_passed": data.get(
+                    "kpi_key_passed",
+                    kpi_counts.get("kpi_key_passed", ""),
+                ),
+                "kpi_key_failed": data.get(
+                    "kpi_key_failed",
+                    kpi_counts.get("kpi_key_failed", ""),
+                ),
+                "kpi_key_no_data": data.get(
+                    "kpi_key_no_data",
+                    kpi_counts.get("kpi_key_no_data", ""),
+                ),
+                "kpi_key_not_passed": data.get(
+                    "kpi_key_not_passed",
+                    kpi_counts.get("kpi_key_not_passed", ""),
+                ),
+                "kpi_key_passed_rate": data.get(
+                    "kpi_key_passed_rate",
+                    kpi_counts.get("kpi_key_passed_rate", ""),
+                ),
+                "kpi_total_passed": data.get(
+                    "kpi_total_passed",
+                    kpi_counts.get("kpi_total_passed", ""),
+                ),
+                "kpi_total_not_passed": data.get(
+                    "kpi_total_not_passed",
+                    kpi_counts.get("kpi_total_not_passed", ""),
+                ),
+            }
+            try:
+                dashboard = DashboardDAO.get_by_id_or_slug(id_or_slug)
+            except DashboardAccessDeniedError:
+                return self.response_403()
+            except DashboardNotFoundError:
+                return self.response_404()
+
+            template_dashboards = current_app.config.get(
+                "WORD_EXPORT_TEMPLATE_DASHBOARDS",
+                (),
+            )
+            template_path = current_app.config.get(
+                "WORD_EXPORT_TEMPLATE_PATH",
+                "TMPL_RP.docx",
+            )
+
+            if is_template_dashboard(
+                dashboard.id,
+                dashboard.slug,
+                dashboard.dashboard_title,
+                template_dashboards,
+            ):
+                output = build_template_word_document(
+                    charts,
+                    template_path,
+                    template_context,
+                )
+            else:
+                output = build_default_word_document(charts, dashboard_title)
+
+            filename = f"{dashboard_title.replace(' ', '_')}_export.docx"
+
+            return Response(
+                output,
+                mimetype=DOCX_CONTENT_TYPE,
+                headers={
+                    "Content-Disposition": _build_docx_content_disposition(
+                        filename,
+                    ),
+                },
+            )
+
+        except Exception as e:
+            logger.exception("Error generating Word document")
+            return self.response_500(message=str(e))
+

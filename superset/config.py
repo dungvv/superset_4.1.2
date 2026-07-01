@@ -1280,6 +1280,16 @@ ALLOWED_EXTRA_AUTHENTICATIONS: dict[str, dict[str, Callable[..., Any]]] = {}
 # The id of a template dashboard that should be copied to every new user
 DASHBOARD_TEMPLATE_ID = None
 
+# Dashboard ids, slugs, or titles that should use WORD_EXPORT_TEMPLATE_PATH
+# when downloaded with "Download as Word".
+WORD_EXPORT_TEMPLATE_DASHBOARDS: list[str | int] = [1]
+WORD_EXPORT_TEMPLATE_PATH = "TMPL_RP.docx"
+
+# Dashboard ids, slugs, or titles that should use EXCEL_EXPORT_TEMPLATE_PATH
+# when downloaded with "Download as Excel".
+EXCEL_EXPORT_TEMPLATE_DASHBOARDS: list[str | int] = WORD_EXPORT_TEMPLATE_DASHBOARDS
+EXCEL_EXPORT_TEMPLATE_PATH = "TMPL_RP.xlsx"
+
 # A callable that allows altering the database connection URL and params
 # on the fly, at runtime. This allows for things like impersonation or
 # arbitrary logic. For instance you can wire different users to

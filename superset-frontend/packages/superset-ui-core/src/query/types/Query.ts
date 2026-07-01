@@ -66,7 +66,15 @@ export type QueryObjectExtras = Partial<{
   having?: string;
   relative_start?: string;
   relative_end?: string;
+  comparison_time_range?: string;
+  current_start_date?: string;
+  current_end_date?: string;
+  comparison_start_date?: string;
+  comparison_end_date?: string;
+  time_group?: string;
   time_grain_sqla?: TimeGranularity;
+  /** Packed time range params from Time Filter (current|comparison|time_group) */
+  time_range_params?: string;
   /** WHERE condition */
   where?: string;
   /** Instant Time Comparison */

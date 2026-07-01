@@ -195,6 +195,7 @@ EXTRA_FORM_DATA_OVERRIDE_REGULAR_MAPPINGS = {
 EXTRA_FORM_DATA_OVERRIDE_EXTRA_KEYS = {
     "relative_start",
     "relative_end",
+    "time_range_params",
 }
 
 EXTRA_FORM_DATA_OVERRIDE_KEYS = (

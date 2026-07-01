@@ -18,6 +18,10 @@ COPY --chown=superset:superset superset/charts/data/api.py /app/superset/charts/
 COPY --chown=superset:superset superset/charts/post_processing.py /app/superset/charts/post_processing.py
 COPY --chown=superset:superset superset_config.py /app/superset_config.py
 COPY --chown=superset:superset superset_custom_auth.py /app/superset_custom_auth.py
+COPY --chown=superset:superset superset/charts/schemas.py /app/superset/charts/schemas.py
+
+# install thư viện word
+RUN pip install --no-cache-dir python-docx
 
 # Back lại user mặc định của superset
 USER superset

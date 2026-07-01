@@ -1,0 +1,17 @@
+# Custom chart superset
+
+tôi muốn xây dựng 1 loại chart custom cho dự án superset của tôi với yêu cầu như sau, biểu đồ gồm 2 phần:
+
+## Phần trên là thông tin KPI bao gồm: 
+
+- Tiêu đề chart: ví dụ: 1. Tỉ lệ cuộc gọi kết nối thành công
+- 1 big number thể hiện con số đo lường của chỉ tiêu (dưới dạng tỉ lệ %), ví dụ 90%
+- bên dưới con số % là con số tuyệt đối lấy từ dữ liệu ví dụ 900/1000, trong đó 900 là số cuộc gọi kết nối thành công, 1000 là tổng số cuộc gọi 
+- bên dưới là dòng Tăng/giảm so với KPI; ví dụ: Tăng 0.25% so với KPI 98%
+- bên dưới là dòng Tăng/giảm so với kỳ trước; ví dụ: Tăng 1% so với kỳ trước
+
+## Phân dưới là biểu đồ line chart có 3 đường:
+
+- giá trị chỉ tiêu trong kỳ này: ví dụ kỳ tháng 4 năm 2026 thì các giá trị tỉ lệ cuộc gọi thành công từ ngày 1 đến ngày 30/4 
+- giá trị chỉ tiêu trong kỳ trước: ví dụ kỳ tháng 4 năm 2026 thì các giá trị tỉ lệ cuộc gọi thành công từ ngày 1 đến ngày 31/3
+- giá trị kpi: giá trị kpi mong muốn của kỳ, ví dụ 96 là tỉ lệ phần trăm mong muốn của các cuộc gọi kết nối thành công

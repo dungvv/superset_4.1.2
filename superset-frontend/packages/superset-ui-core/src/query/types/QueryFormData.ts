@@ -122,7 +122,16 @@ export type ExtraFormDataAppend = {
  * filter clauses can't be overridden */
 export type ExtraFormDataOverrideExtras = Pick<
   QueryObjectExtras,
-  'relative_start' | 'relative_end' | 'time_grain_sqla'
+  | 'relative_start'
+  | 'relative_end'
+  | 'comparison_time_range'
+  | 'current_start_date'
+  | 'current_end_date'
+  | 'comparison_start_date'
+  | 'comparison_end_date'
+  | 'time_group'
+  | 'time_grain_sqla'
+  | 'time_range_params'
 >;
 
 /** These parameters override those already present in the form data/query object */

@@ -1,0 +1,42 @@
+{
+  "name": "@superset-ui/plugin-chart-kpi-line",
+  "version": "0.18.25",
+  "description": "Superset Chart - KPI with Line Chart",
+  "sideEffects": false,
+  "main": "lib/index.js",
+  "module": "esm/index.js",
+  "files": [
+    "esm",
+    "lib"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/apache/superset.git",
+    "directory": "superset-frontend/plugins/plugin-chart-kpi-line"
+  },
+  "keywords": [
+    "superset"
+  ],
+  "author": "Superset",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/apache/superset/issues"
+  },
+  "homepage": "https://github.com/apache/superset/tree/master/superset-frontend/plugins/plugin-chart-kpi-line#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "echarts": "^5.4.1"
+  },
+  "peerDependencies": {
+    "@superset-ui/chart-controls": "*",
+    "@superset-ui/core": "*",
+    "lodash": "^4.17.11",
+    "react": "^16.13.1"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.12",
+    "jest": "^29.7.0"
+  }
+}

@@ -107,6 +107,14 @@ export default function getFormDataWithExtraFilters({
   const filterIdsAppliedOnChart = Object.entries(activeFilters)
     .filter(([, { scope }]) => scope.includes(chart.id))
     .map(([filterId]) => filterId);
+  const unitelTimeFilterIds = Object.entries(activeFilters)
+    .filter(
+      ([filterId, { values }]) =>
+        !filterIdsAppliedOnChart.includes(filterId) && values?.time_range,
+    )
+    .map(([filterId]) => filterId);
+  filterIdsAppliedOnChart.push(...unitelTimeFilterIds);
+
   if (filterIdsAppliedOnChart.length) {
     extraData = {
       extra_form_data: getExtraFormData(dataMask, filterIdsAppliedOnChart),

@@ -22,6 +22,8 @@ import DownloadScreenshot from './DownloadScreenshot';
 import { DownloadScreenshotFormat } from './types';
 import DownloadAsPdf from './DownloadAsPdf';
 import DownloadAsImage from './DownloadAsImage';
+import DownloadWord from './DownloadWord';
+import DownloadExcel from './DownloadExcel';
 
 export interface DownloadMenuItemProps {
   pdfMenuItemTitle: string;
@@ -79,6 +81,16 @@ const DownloadMenuItems = (props: DownloadMenuItemProps) => {
           />
         </>
       )}
+      <DownloadWord
+        dashboardId={dashboardId}
+        dashboardTitle={dashboardTitle}
+        {...rest}
+      />
+      <DownloadExcel
+        dashboardId={dashboardId}
+        dashboardTitle={dashboardTitle}
+        {...rest}
+      />
     </Menu>
   );
 };

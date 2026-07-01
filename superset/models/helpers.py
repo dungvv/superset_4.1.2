@@ -1485,6 +1485,18 @@ class ExploreMixin:  # pylint: disable=too-many-public-methods
             series_limit = timeseries_limit
         series_limit_metric = series_limit_metric or timeseries_limit_metric
         template_kwargs.update(self.template_params_dict)
+
+        time_range_params = extras.get("time_range_params", "")
+        if time_range_params:
+            parts = time_range_params.split("|")
+            if len(parts) >= 5:
+                template_kwargs["time_range_params"] = time_range_params
+                template_kwargs["current_start_date"] = parts[0]
+                template_kwargs["current_end_date"] = parts[1]
+                template_kwargs["comparison_start_date"] = parts[2]
+                template_kwargs["comparison_end_date"] = parts[3]
+                template_kwargs["time_group"] = parts[4]
+
         extra_cache_keys: list[Any] = []
         template_kwargs["extra_cache_keys"] = extra_cache_keys
         removed_filters: list[str] = []

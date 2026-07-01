@@ -1,0 +1,140 @@
+x-superset-image: &superset-image unitel/superset-chrome:update-Lao
+
+x-superset-env: &superset-env
+  DATABASE_DIALECT: postgresql+psycopg2
+  DATABASE_USER: superset
+  DATABASE_PASSWORD: superset
+  DATABASE_HOST: db
+  DATABASE_PORT: "5432"
+  DATABASE_DB: superset
+  EXAMPLES_USER: superset
+  EXAMPLES_PASSWORD: superset
+  EXAMPLES_HOST: db
+  EXAMPLES_PORT: "5432"
+  EXAMPLES_DB: superset
+  POSTGRES_USER: superset
+  POSTGRES_PASSWORD: superset
+  POSTGRES_DB: superset
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  SECRET_KEY: DEV_SECRET_KEY_CHANGE_ME
+  SUPERSET_ENV: development
+  SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
+  FLASK_DEBUG: "true"
+  DEV_MODE: "true"
+  TALISMAN_ENABLED: "False"
+  WTF_CSRF_ENABLED: "False"
+  WEBDRIVER_TYPE: chrome
+  SCREENSHOT_SELENIUM_WEBDRIVER: chrome
+  WORD_EXPORT_TEMPLATE_PATH: /app/templates/TMPL_RP.docx
+  TZ: Asia/Ho_Chi_Minh
+
+x-superset-volumes: &superset-volumes
+  - ./docker/pythonpath_dev:/app/pythonpath
+  - ./superset_config.py:/app/pythonpath/superset_config_docker.py
+  - ./superset_custom_auth.py:/app/superset_custom_auth.py
+  - ./docker:/app/docker
+  - ./superset/static/assets:/app/superset/static/assets
+  - ./TMPL_RP.docx:/app/templates/TMPL_RP.docx:ro
+  - superset_home:/app/superset_home
+  - ./superset/charts/schemas.py:/app/superset/charts/schemas.py
+  - ./superset/charts/post_processing.py:/app/superset/charts/post_processing.py
+  - ./superset/charts/data/api.py:/app/superset/charts/data/api.py
+  - ./superset/common/query_context.py:/app/superset/common/query_context.py
+  - ./superset/common/query_context_processor.py:/app/superset/common/query_context_processor.py
+  - ./superset/common/utils/time_range_utils.py:/app/superset/common/utils/time_range_utils.py
+  - ./superset/models/helpers.py:/app/superset/models/helpers.py
+  - ./superset/dashboards/api.py:/app/superset/dashboards/api.py
+  - ./superset/dashboards/word_export.py:/app/superset/dashboards/word_export.py
+  - ./superset/utils/excel.py:/app/superset/utils/excel.py
+  - ./superset/utils/csv.py:/app/superset/utils/csv.py
+  - ./superset/utils/filename_utils.py:/app/superset/utils/filename_utils.py
+  - ./superset/reports/notifications/base.py:/app/superset/reports/notifications/base.py
+  - ./superset/reports/notifications/email.py:/app/superset/reports/notifications/email.py
+  - ./superset/commands/report/execute.py:/app/superset/commands/report/execute.py
+
+services:
+  db:
+    image: postgres:15
+    container_name: unitel_superset_dev_db
+    environment:
+      POSTGRES_USER: superset
+      POSTGRES_PASSWORD: superset
+      POSTGRES_DB: superset
+    ports:
+      - "5432:5432"
+    volumes:
+      - unitel_superset_dev_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U superset -d superset"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7
+    container_name: unitel_superset_dev_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - unitel_superset_dev_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  superset-init:
+    image: *superset-image
+    container_name: unitel_superset_dev_init
+    user: root
+    command:
+      - /app/docker/docker-init.sh
+    environment: *superset-env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes: *superset-volumes
+
+  superset:
+    image: *superset-image
+    container_name: unitel_superset_dev_app
+    user: root
+    command: ["/app/docker/docker-bootstrap.sh", "app"]
+    environment: *superset-env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      superset-init:
+        condition: service_completed_successfully
+    ports:
+      - "8088:8088"
+    volumes: *superset-volumes
+    restart: unless-stopped
+
+  superset-worker:
+    image: *superset-image
+    container_name: unitel_superset_dev_worker
+    user: root
+    command: ["/app/docker/docker-bootstrap.sh", "worker"]
+    environment: *superset-env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      superset-init:
+        condition: service_completed_successfully
+    volumes: *superset-volumes
+    restart: unless-stopped
+
+volumes:
+  unitel_superset_dev_db:
+  unitel_superset_dev_redis:
+  superset_home:

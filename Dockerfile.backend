@@ -1,0 +1,44 @@
+FROM python:3.10-slim-bookworm
+
+WORKDIR /app
+ENV LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    SUPERSET_ENV=production \
+    FLASK_APP="superset.app:create_app()" \
+    PYTHONPATH="/app/pythonpath" \
+    SUPERSET_HOME="/app/superset_home" \
+    SUPERSET_PORT=8088
+
+RUN mkdir -p ${PYTHONPATH} superset/static/assets superset/translations \
+    && useradd --user-group -d ${SUPERSET_HOME} -m --no-log-init --shell /bin/bash superset \
+    && apt-get update -qq && apt-get install -yqq --no-install-recommends \
+        curl \
+        default-libmysqlclient-dev \
+        libsasl2-dev \
+        libsasl2-modules-gssapi-mit \
+        libpq-dev \
+        libecpg-dev \
+        libldap2-dev \
+        build-essential \
+    && touch superset/static/version_info.json \
+    && chown -R superset:superset . \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --chown=superset:superset pyproject.toml setup.py MANIFEST.in README.md ./
+COPY --chown=superset:superset superset-frontend/package.json superset-frontend/
+COPY --chown=superset:superset requirements/base.txt requirements/
+RUN pip install --upgrade setuptools==69.5.1 pip \
+    && pip install -r requirements/base.txt \
+    && apt-get remove -yqq build-essential && apt-get autoremove -yqq \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --chown=superset:superset superset superset
+RUN pip install -e . \
+    && pip install psycopg2-binary pillow celery redis
+
+USER superset
+
+HEALTHCHECK CMD curl -f "http://localhost:${SUPERSET_PORT}/health"
+EXPOSE ${SUPERSET_PORT}
+
+CMD ["flask", "run", "-p", "8088", "--with-threads", "--host=0.0.0.0"]

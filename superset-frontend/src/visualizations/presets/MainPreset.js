@@ -80,6 +80,8 @@ import {
 } from 'src/filters/components';
 import { PivotTableChartPlugin as PivotTableChartPluginV2 } from '@superset-ui/plugin-chart-pivot-table';
 import { HandlebarsChartPlugin } from '@superset-ui/plugin-chart-handlebars';
+import { KpiLineChartPlugin } from '@superset-ui/plugin-chart-kpi-line';
+import { TimeFilterChartPlugin } from '@superset-ui/plugin-chart-time-filter';
 import { FilterPlugins } from 'src/constants';
 import TimeTableChartPlugin from '../TimeTable';
 
@@ -176,6 +178,8 @@ export default class MainPreset extends Preset {
         new EchartsTreeChartPlugin().configure({ key: 'tree_chart' }),
         new EchartsSunburstChartPlugin().configure({ key: 'sunburst_v2' }),
         new HandlebarsChartPlugin().configure({ key: 'handlebars' }),
+        new KpiLineChartPlugin().configure({ key: 'kpi_line_chart' }),
+        new TimeFilterChartPlugin().configure({ key: 'time_filter_chart' }),
         new EchartsBubbleChartPlugin().configure({ key: 'bubble_v2' }),
         ...experimentalPlugins,
       ],

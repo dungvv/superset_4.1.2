@@ -43,7 +43,7 @@ RUN --mount=type=bind,target=/frontend-mem-nag.sh,src=./docker/frontend-mem-nag.
 WORKDIR /app/superset-frontend
 RUN --mount=type=bind,target=./package.json,src=./superset-frontend/package.json \
     --mount=type=bind,target=./package-lock.json,src=./superset-frontend/package-lock.json \
-    npm ci
+    npm install --legacy-peer-deps
 
 # Runs the webpack build process
 COPY superset-frontend /app/superset-frontend
