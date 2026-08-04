@@ -49,13 +49,18 @@ export const getAllActiveFilters = ({
 
   // Combine native filters with cross filters, because they have similar logic
   Object.values(dataMask).forEach(({ id: filterId, extraFormData }) => {
-    const scope =
-      nativeFilters?.[filterId]?.chartsInScope ??
-      chartConfiguration?.[filterId]?.crossFilters?.chartsInScope ??
-      allSliceIds ??
-      [];
-    const filterType = nativeFilters?.[filterId]?.filterType;
-    const targets = nativeFilters?.[filterId]?.targets ?? scope;
+    const nativeFilter = nativeFilters?.[filterId];
+    // Native filters must never fall back to allSliceIds — that ignores
+    // scoping and lets out-of-scope (and "Filters out of scope") filters
+    // overwrite in-scope ones for override fields like time_range.
+    // Prefer chartsInScope; until it is computed use [] (apply to none).
+    const scope = nativeFilter
+      ? (nativeFilter.chartsInScope ?? [])
+      : (chartConfiguration?.[filterId]?.crossFilters?.chartsInScope ??
+        allSliceIds ??
+        []);
+    const filterType = nativeFilter?.filterType;
+    const targets = nativeFilter?.targets ?? scope;
     // Iterate over all roots to find all affected charts
     activeFilters[filterId] = {
       scope,

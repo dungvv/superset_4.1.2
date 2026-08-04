@@ -152,7 +152,10 @@ const DashboardContainer: FC<DashboardContainerProps> = ({ topLevelTabs }) => {
       };
     });
     dispatch(setInScopeStatusOfFilters(scopes));
-  }, [nativeFilterScopes, dashboardLayout, dispatch]);
+    // chartIds must be a dependency: charts can load after layout is ready.
+    // Without it, chartsInScope stays empty → filters land in
+    // "Filters out of scope" and/or fail to apply to the intended charts.
+  }, [nativeFilterScopes, dashboardLayout, chartIds, dispatch]);
 
   const childIds: string[] = topLevelTabs
     ? topLevelTabs.children

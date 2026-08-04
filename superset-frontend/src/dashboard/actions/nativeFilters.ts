@@ -137,7 +137,14 @@ export const setInScopeStatusOfFilters =
       if (!filterWithScope) {
         return filter;
       }
-      return { ...filterWithScope, ...filter };
+      // Keep computed chartsInScope/tabsInScope — spreading `filter` last
+      // would overwrite them with stale metadata and break scoping for all
+      // filter types (time, value, grain, etc.).
+      return {
+        ...filter,
+        chartsInScope: filterWithScope.chartsInScope,
+        tabsInScope: filterWithScope.tabsInScope,
+      };
     });
     metadata.native_filter_configuration = mergedFilterConfig;
     dispatch(

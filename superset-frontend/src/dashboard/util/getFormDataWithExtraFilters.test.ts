@@ -90,4 +90,173 @@ describe('getFormDataWithExtraFilters', () => {
     const result = getFormDataWithExtraFilters(mockArgs);
     expect(result.stack).toEqual('Stacked');
   });
+
+  it('should only apply in-scope Time filters (not out-of-scope ones)', () => {
+    const timeFilterA = 'NATIVE_FILTER-time-a';
+    const timeFilterB = 'NATIVE_FILTER-time-b';
+    const chartAId = chartId;
+    const chartBId = chartId + 1;
+
+    const result = getFormDataWithExtraFilters({
+      ...mockArgs,
+      chart: { ...mockChart, id: chartAId },
+      sliceId: chartAId,
+      allSliceIds: [chartAId, chartBId],
+      nativeFilters: {
+        [timeFilterA]: {
+          id: timeFilterA,
+          filterType: 'filter_time',
+          chartsInScope: [chartAId],
+          targets: [],
+        },
+        [timeFilterB]: {
+          id: timeFilterB,
+          filterType: 'filter_time',
+          chartsInScope: [chartBId],
+          targets: [],
+        },
+      },
+      dataMask: {
+        [timeFilterA]: {
+          id: timeFilterA,
+          extraFormData: { time_range: 'Last week' },
+          filterState: { value: 'Last week' },
+          ownState: {},
+        },
+        [timeFilterB]: {
+          id: timeFilterB,
+          extraFormData: { time_range: 'Last month' },
+          filterState: { value: 'Last month' },
+          ownState: {},
+        },
+      },
+    });
+
+    expect(result.extra_form_data).toEqual({ time_range: 'Last week' });
+  });
+
+  it('should not apply out-of-scope Time filter to a chart', () => {
+    const timeFilterB = 'NATIVE_FILTER-time-b';
+    const chartAId = chartId;
+    const chartBId = chartId + 1;
+
+    const result = getFormDataWithExtraFilters({
+      ...mockArgs,
+      chart: { ...mockChart, id: chartAId },
+      sliceId: chartAId,
+      allSliceIds: [chartAId, chartBId],
+      nativeFilters: {
+        [timeFilterB]: {
+          id: timeFilterB,
+          filterType: 'filter_time',
+          chartsInScope: [chartBId],
+          targets: [],
+        },
+      },
+      dataMask: {
+        [timeFilterB]: {
+          id: timeFilterB,
+          extraFormData: { time_range: 'Last month' },
+          filterState: { value: 'Last month' },
+          ownState: {},
+        },
+      },
+    });
+
+    expect(result.extra_form_data).toBeUndefined();
+  });
+
+  it('should only apply in-scope Value filters (not out-of-scope ones)', () => {
+    const valueFilterA = 'NATIVE_FILTER-value-a';
+    const valueFilterB = 'NATIVE_FILTER-value-b';
+    const chartAId = chartId;
+    const chartBId = chartId + 1;
+
+    const result = getFormDataWithExtraFilters({
+      ...mockArgs,
+      chart: { ...mockChart, id: chartAId },
+      sliceId: chartAId,
+      allSliceIds: [chartAId, chartBId],
+      nativeFilters: {
+        [valueFilterA]: {
+          id: valueFilterA,
+          filterType: 'filter_select',
+          chartsInScope: [chartAId],
+          targets: [{ column: { name: 'country' } }],
+        },
+        [valueFilterB]: {
+          id: valueFilterB,
+          filterType: 'filter_select',
+          chartsInScope: [chartBId],
+          targets: [{ column: { name: 'region' } }],
+        },
+      },
+      dataMask: {
+        [valueFilterA]: {
+          id: valueFilterA,
+          extraFormData: {
+            filters: [{ col: 'country', op: 'IN', val: ['USA'] }],
+          },
+          filterState: { value: ['USA'] },
+          ownState: {},
+        },
+        [valueFilterB]: {
+          id: valueFilterB,
+          extraFormData: {
+            filters: [{ col: 'region', op: 'IN', val: ['West'] }],
+          },
+          filterState: { value: ['West'] },
+          ownState: {},
+        },
+      },
+    });
+
+    expect(result.extra_form_data).toEqual({
+      filters: [{ col: 'country', op: 'IN', val: ['USA'] }],
+    });
+  });
+
+  it('should only apply in-scope Time grain filters (override fields)', () => {
+    const grainFilterA = 'NATIVE_FILTER-grain-a';
+    const grainFilterB = 'NATIVE_FILTER-grain-b';
+    const chartAId = chartId;
+    const chartBId = chartId + 1;
+
+    const result = getFormDataWithExtraFilters({
+      ...mockArgs,
+      chart: { ...mockChart, id: chartAId },
+      sliceId: chartAId,
+      allSliceIds: [chartAId, chartBId],
+      nativeFilters: {
+        [grainFilterA]: {
+          id: grainFilterA,
+          filterType: 'filter_timegrain',
+          chartsInScope: [chartAId],
+          targets: [],
+        },
+        [grainFilterB]: {
+          id: grainFilterB,
+          filterType: 'filter_timegrain',
+          chartsInScope: [chartBId],
+          targets: [],
+        },
+      },
+      dataMask: {
+        [grainFilterA]: {
+          id: grainFilterA,
+          extraFormData: { time_grain_sqla: 'P1D' },
+          filterState: { value: 'P1D' },
+          ownState: {},
+        },
+        [grainFilterB]: {
+          id: grainFilterB,
+          extraFormData: { time_grain_sqla: 'P1W' },
+          filterState: { value: 'P1W' },
+          ownState: {},
+        },
+      },
+    });
+
+    expect(result.extra_form_data).toEqual({ time_grain_sqla: 'P1D' });
+  });
 });

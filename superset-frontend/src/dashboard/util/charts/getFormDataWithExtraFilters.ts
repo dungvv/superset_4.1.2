@@ -104,16 +104,12 @@ export default function getFormDataWithExtraFilters({
     nativeFilters,
     allSliceIds,
   });
+  // Only apply filters whose scope includes this chart.
+  // Time filters must respect scoping too — otherwise multiple Time filters
+  // overwrite each other's time_range (last merge wins) and appear "swapped".
   const filterIdsAppliedOnChart = Object.entries(activeFilters)
     .filter(([, { scope }]) => scope.includes(chart.id))
     .map(([filterId]) => filterId);
-  const unitelTimeFilterIds = Object.entries(activeFilters)
-    .filter(
-      ([filterId, { values }]) =>
-        !filterIdsAppliedOnChart.includes(filterId) && values?.time_range,
-    )
-    .map(([filterId]) => filterId);
-  filterIdsAppliedOnChart.push(...unitelTimeFilterIds);
 
   if (filterIdsAppliedOnChart.length) {
     extraData = {
