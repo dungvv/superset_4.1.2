@@ -57,6 +57,7 @@ import {
   setDashboardMetadata,
 } from 'src/dashboard/actions/dashboardState';
 import { areObjectsEqual } from 'src/reduxUtils';
+import { stringifyDashboardMetadataForSave } from 'src/dashboard/util/sanitizeDashboardMetadataForSave';
 
 const StyledFormItem = styled(FormItem)`
   margin-bottom: 0;
@@ -377,7 +378,7 @@ const PropertiesModal = ({
       updateMetadata: false,
     });
 
-    currentJsonMetadata = jsonStringify(metadata);
+    currentJsonMetadata = stringifyDashboardMetadataForSave(metadata);
 
     const moreOnSubmitProps: { roles?: Roles } = {};
     const morePutProps: { roles?: number[]; tags?: (number | undefined)[] } =

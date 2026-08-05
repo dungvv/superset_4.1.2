@@ -76,8 +76,36 @@ import {
   getLabelsColorMapEntries,
   getFreshSharedLabels,
 } from '../../utils/colorScheme';
+import {
+  sanitizeDashboardMetadataForSave,
+  stringifyDashboardMetadataForSave,
+} from '../util/sanitizeDashboardMetadataForSave';
+
+function formatSaveDashboardError(error, message) {
+  if (typeof message === 'string' && message === 'Forbidden') {
+    return t('You do not have permission to edit this dashboard');
+  }
+  let detail = error;
+  if (detail != null && typeof detail === 'object') {
+    try {
+      detail = JSON.stringify(detail);
+    } catch (e) {
+      detail = String(detail);
+    }
+  }
+  if (detail == null && typeof message === 'string') {
+    detail = message;
+  }
+  if (detail == null || detail === '') {
+    return t('Sorry, an unknown error occurred');
+  }
+  return t('Sorry, there was an error saving this dashboard: %s', detail);
+}
 
 export const SET_UNSAVED_CHANGES = 'SET_UNSAVED_CHANGES';
+// re-export for tests / external callers
+export { sanitizeDashboardMetadataForSave } from '../util/sanitizeDashboardMetadataForSave';
+
 export function setUnsavedChanges(hasUnsavedChanges) {
   return { type: SET_UNSAVED_CHANGES, payload: { hasUnsavedChanges } };
 }
@@ -310,7 +338,7 @@ export function saveDashboardRequest(data, id, saveType) {
         ? undefined
         : ensureIsArray(roles).map(r => (hasId(r) ? r.id : r)),
       slug: slug || null,
-      metadata: {
+      metadata: sanitizeDashboardMetadataForSave({
         ...data.metadata,
         color_namespace: getColorNamespace(data.metadata?.color_namespace),
         color_scheme: colorScheme || '',
@@ -328,7 +356,7 @@ export function saveDashboardRequest(data, id, saveType) {
         cross_filters_enabled: isCrossFiltersEnabled(
           metadataCrossFiltersEnabled,
         ),
-      },
+      }),
     };
 
     const handleChartConfiguration = () => {
@@ -413,17 +441,7 @@ export function saveDashboardRequest(data, id, saveType) {
 
     const onError = async response => {
       const { error, message } = await getClientErrorObject(response);
-      let errorText = t('Sorry, an unknown error occurred');
-
-      if (error) {
-        errorText = t(
-          'Sorry, there was an error saving this dashboard: %s',
-          error,
-        );
-      }
-      if (typeof message === 'string' && message === 'Forbidden') {
-        errorText = t('You do not have permission to edit this dashboard');
-      }
+      const errorText = formatSaveDashboardError(error, message);
       dispatch(saveDashboardFinished());
       dispatch(addDangerToast(errorText));
     };
@@ -439,7 +457,15 @@ export function saveDashboardRequest(data, id, saveType) {
       }
       const updatedDashboard =
         saveType === SAVE_TYPE_OVERWRITE_CONFIRMED
-          ? data
+          ? {
+              ...data,
+              json_metadata:
+                typeof data.json_metadata === 'string'
+                  ? stringifyDashboardMetadataForSave(
+                      JSON.parse(data.json_metadata),
+                    )
+                  : stringifyDashboardMetadataForSave(data.json_metadata),
+            }
           : {
               certified_by: cleanedData.certified_by,
               certification_details: cleanedData.certification_details,
@@ -448,7 +474,7 @@ export function saveDashboardRequest(data, id, saveType) {
               slug: cleanedData.slug,
               owners: cleanedData.owners,
               roles: cleanedData.roles,
-              json_metadata: safeStringify({
+              json_metadata: stringifyDashboardMetadataForSave({
                 ...(cleanedData?.metadata || {}),
                 default_filters: safeStringify(serializedFilters),
                 filter_scopes: serializedFilterScopes,
@@ -517,11 +543,14 @@ export function saveDashboardRequest(data, id, saveType) {
     }
     cleanedData.metadata.default_filters = safeStringify(serializedFilters);
     cleanedData.metadata.filter_scopes = serializedFilterScopes;
+    cleanedData.metadata = sanitizeDashboardMetadataForSave(
+      cleanedData.metadata,
+    );
     const copyPayload = {
       dashboard_title: cleanedData.dashboard_title,
       css: cleanedData.css,
       duplicate_slices: cleanedData.duplicate_slices,
-      json_metadata: JSON.stringify(cleanedData.metadata),
+      json_metadata: stringifyDashboardMetadataForSave(cleanedData.metadata),
     };
 
     return SupersetClient.post({
@@ -723,7 +752,9 @@ const storeDashboardMetadata = async (id, metadata) =>
   SupersetClient.put({
     endpoint: `/api/v1/dashboard/${id}`,
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ json_metadata: JSON.stringify(metadata) }),
+    body: JSON.stringify({
+      json_metadata: stringifyDashboardMetadataForSave(metadata),
+    }),
   });
 
 /**

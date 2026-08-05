@@ -135,6 +135,80 @@ describe('getFormDataWithExtraFilters', () => {
     expect(result.extra_form_data).toEqual({ time_range: 'Last week' });
   });
 
+  it('should ignore stale chartsInScope when ROOT scope excludes a chart', () => {
+    // Real bug: metadata chartsInScope still lists chart 3 after user
+    // scoped Last day to chart 1 only (excluded = [2, 3]).
+    const timeFilterA = 'NATIVE_FILTER-time-day';
+    const chartAId = chartId;
+    const chartBId = chartId + 1;
+    const chartCId = chartId + 2;
+
+    const result = getFormDataWithExtraFilters({
+      ...mockArgs,
+      chart: { ...mockChart, id: chartCId },
+      sliceId: chartCId,
+      allSliceIds: [chartAId, chartBId, chartCId],
+      nativeFilters: {
+        [timeFilterA]: {
+          id: timeFilterA,
+          filterType: 'filter_time',
+          // stale: still lists all charts
+          chartsInScope: [chartAId, chartBId, chartCId],
+          scope: {
+            rootPath: ['ROOT_ID'],
+            excluded: [chartBId, chartCId],
+          },
+          targets: [],
+        },
+      },
+      dataMask: {
+        [timeFilterA]: {
+          id: timeFilterA,
+          extraFormData: { time_range: 'Last day' },
+          filterState: { value: 'Last day' },
+          ownState: {},
+        },
+      },
+    });
+
+    expect(result.extra_form_data).toBeUndefined();
+  });
+
+  it('should apply Last day only to charts not in excluded list', () => {
+    const timeFilterA = 'NATIVE_FILTER-time-day';
+    const chartAId = chartId;
+    const chartBId = chartId + 1;
+    const chartCId = chartId + 2;
+
+    const inScope = getFormDataWithExtraFilters({
+      ...mockArgs,
+      chart: { ...mockChart, id: chartAId },
+      sliceId: chartAId,
+      allSliceIds: [chartAId, chartBId, chartCId],
+      nativeFilters: {
+        [timeFilterA]: {
+          id: timeFilterA,
+          filterType: 'filter_time',
+          chartsInScope: [chartAId],
+          scope: {
+            rootPath: ['ROOT_ID'],
+            excluded: [chartBId, chartCId],
+          },
+          targets: [],
+        },
+      },
+      dataMask: {
+        [timeFilterA]: {
+          id: timeFilterA,
+          extraFormData: { time_range: 'Last day' },
+          filterState: { value: 'Last day' },
+          ownState: {},
+        },
+      },
+    });
+    expect(inScope.extra_form_data).toEqual({ time_range: 'Last day' });
+  });
+
   it('should not apply out-of-scope Time filter to a chart', () => {
     const timeFilterB = 'NATIVE_FILTER-time-b';
     const chartAId = chartId;

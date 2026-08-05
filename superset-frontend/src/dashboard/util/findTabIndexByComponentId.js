@@ -16,6 +16,14 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+
+/**
+ * @param {{
+ *   currentComponent?: { id: string, children?: string[] },
+ *   directPathToChild?: string[],
+ * }} args
+ * @returns {number}
+ */
 export default function findTabIndexByComponentId({
   currentComponent,
   directPathToChild = [],

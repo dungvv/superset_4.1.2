@@ -26,6 +26,7 @@ import {
 import { HYDRATE_DASHBOARD } from './hydrate';
 import { dashboardInfoChanged } from './dashboardInfo';
 import { DashboardInfo } from '../types';
+import { stringifyDashboardMetadataForSave } from '../util/sanitizeDashboardMetadataForSave';
 
 export const SET_FILTER_CONFIG_BEGIN = 'SET_FILTER_CONFIG_BEGIN';
 export interface SetFilterConfigBegin {
@@ -78,7 +79,7 @@ export const setFilterConfiguration =
 
     try {
       const response = await updateDashboard({
-        json_metadata: JSON.stringify({
+        json_metadata: stringifyDashboardMetadataForSave({
           ...metadata,
           native_filter_configuration: mergedFilterConfig,
         }),

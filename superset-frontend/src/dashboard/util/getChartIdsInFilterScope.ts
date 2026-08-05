@@ -26,15 +26,21 @@ export function getChartIdsInFilterScope(
   layout: Layout,
 ) {
   const layoutItems = Object.values(layout);
-  return chartIds.filter(
-    chartId =>
-      !filterScope.excluded.includes(chartId) &&
-      layoutItems
-        .find(
-          layoutItem =>
-            layoutItem?.type === CHART_TYPE &&
-            layoutItem.meta?.chartId === chartId,
-        )
-        ?.parents?.some(elementId => filterScope.rootPath.includes(elementId)),
-  );
+  // Coerce ids — metadata sometimes stores excluded as strings, which makes
+  // includes() miss and leave charts incorrectly in filter scope.
+  const excluded = new Set((filterScope.excluded ?? []).map(Number));
+  const rootPath = new Set(filterScope.rootPath ?? []);
+  return chartIds
+    .map(Number)
+    .filter(
+      chartId =>
+        !excluded.has(chartId) &&
+        layoutItems
+          .find(
+            layoutItem =>
+              layoutItem?.type === CHART_TYPE &&
+              Number(layoutItem.meta?.chartId) === chartId,
+          )
+          ?.parents?.some(elementId => rootPath.has(elementId)),
+    );
 }

@@ -27,6 +27,7 @@ import {
   RootState,
 } from 'src/dashboard/types';
 import { onSave } from './dashboardState';
+import { stringifyDashboardMetadataForSave } from '../util/sanitizeDashboardMetadataForSave';
 
 export const DASHBOARD_INFO_UPDATED = 'DASHBOARD_INFO_UPDATED';
 
@@ -65,7 +66,7 @@ export const saveChartConfiguration =
 
     try {
       const response = await updateDashboard({
-        json_metadata: JSON.stringify({
+        json_metadata: stringifyDashboardMetadataForSave({
           ...metadata,
           chart_configuration:
             chartConfiguration ?? metadata.chart_configuration,
@@ -119,7 +120,7 @@ export function saveFilterBarOrientation(orientation: FilterBarOrientation) {
     });
     try {
       const response = await updateDashboard({
-        json_metadata: JSON.stringify({
+        json_metadata: stringifyDashboardMetadataForSave({
           ...metadata,
           filter_bar_orientation: orientation,
         }),
@@ -155,7 +156,7 @@ export function saveCrossFiltersSetting(crossFiltersEnabled: boolean) {
     });
     try {
       const response = await updateDashboard({
-        json_metadata: JSON.stringify({
+        json_metadata: stringifyDashboardMetadataForSave({
           ...metadata,
           cross_filters_enabled: crossFiltersEnabled,
         }),

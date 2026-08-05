@@ -27,12 +27,27 @@ import { getExtraFormData } from 'src/dashboard/components/nativeFilters/utils';
 import { areObjectsEqual } from 'src/reduxUtils';
 import { isEqual } from 'lodash';
 import getEffectiveExtraFilters from './getEffectiveExtraFilters';
-import { getAllActiveFilters } from '../activeAllDashboardFilters';
+import {
+  getAllActiveFilters,
+  isInScope,
+} from '../activeAllDashboardFilters';
 
 // We cache formData objects so that our connected container components don't always trigger
 // render cascades. we cannot leverage the reselect library because our cache size is >1
 const cachedFiltersByChart = {};
 const cachedFormdataByChart = {};
+
+/** Scope fingerprint so cache invalidates when filter → chart mapping changes. */
+function nativeFilterScopeKey(nativeFilters: PartialFilters | undefined) {
+  if (!nativeFilters) {
+    return [];
+  }
+  return Object.values(nativeFilters).map(filter => ({
+    id: filter?.id,
+    chartsInScope: filter?.chartsInScope,
+    scope: filter?.scope,
+  }));
+}
 
 export interface GetFormDataWithExtraFiltersArguments {
   chartConfiguration: ChartConfiguration;
@@ -72,6 +87,7 @@ export default function getFormDataWithExtraFilters({
 }: GetFormDataWithExtraFiltersArguments) {
   // if dashboard metadata + filters have not changed, use cache if possible
   const cachedFormData = cachedFormdataByChart[sliceId];
+  const scopeKey = nativeFilterScopeKey(nativeFilters);
   if (
     cachedFiltersByChart[sliceId] === filters &&
     areObjectsEqual(cachedFormData?.own_color_scheme, ownColorScheme) &&
@@ -92,7 +108,11 @@ export default function getFormDataWithExtraFilters({
     }) &&
     areObjectsEqual(cachedFormData?.extraControls, extraControls, {
       ignoreUndefined: true,
-    })
+    }) &&
+    // Must invalidate when scope changes — previously chart 3 kept Last day
+    // after scope was limited to chart 1 because this cache never keyed scope.
+    isEqual(cachedFormData?.nativeFilterScopeKey, scopeKey) &&
+    isEqual(cachedFormData?.allSliceIds, allSliceIds)
   ) {
     return cachedFormData;
   }
@@ -108,7 +128,7 @@ export default function getFormDataWithExtraFilters({
   // Time filters must respect scoping too — otherwise multiple Time filters
   // overwrite each other's time_range (last merge wins) and appear "swapped".
   const filterIdsAppliedOnChart = Object.entries(activeFilters)
-    .filter(([, { scope }]) => scope.includes(chart.id))
+    .filter(([, { scope }]) => isInScope(scope, chart.id))
     .map(([filterId]) => filterId);
 
   if (filterIdsAppliedOnChart.length) {
@@ -133,7 +153,13 @@ export default function getFormDataWithExtraFilters({
   };
 
   cachedFiltersByChart[sliceId] = filters;
-  cachedFormdataByChart[sliceId] = { ...formData, dataMask, extraControls };
+  cachedFormdataByChart[sliceId] = {
+    ...formData,
+    dataMask,
+    extraControls,
+    nativeFilterScopeKey: scopeKey,
+    allSliceIds,
+  };
 
   return formData;
 }

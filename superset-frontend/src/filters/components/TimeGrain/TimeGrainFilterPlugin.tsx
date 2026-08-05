@@ -133,6 +133,7 @@ export default function PluginFilterTimegrain(
           ref={inputRef}
           options={options}
           onDropdownVisibleChange={setFilterActive}
+          getPopupContainer={() => document.body}
         />
       </StyledFormItem>
     </FilterPluginStyle>

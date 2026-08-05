@@ -19,15 +19,14 @@
 // ParentSize uses resize observer so the dashboard will update size
 // when its container size changes, due to e.g., builder side panel opening
 import { FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useDispatch, useSelector } from 'react-redux';
+import { shallowEqual, useDispatch, useSelector } from 'react-redux';
 import {
-  Filter,
   Filters,
   LabelsColorMapSource,
   getLabelsColorMap,
 } from '@superset-ui/core';
 import { ParentSize } from '@visx/responsive';
-import { pick } from 'lodash';
+import { isEqual, pick } from 'lodash';
 import Tabs from 'src/components/Tabs';
 import DashboardGrid from 'src/dashboard/containers/DashboardGrid';
 import {
@@ -59,24 +58,39 @@ type DashboardContainerProps = {
   topLevelTabs?: LayoutItem;
 };
 
+// Only id/scope/type — not chartsInScope — so recomputing scope does not
+// invalidate this selector and re-trigger the scope effect (React #185 loop).
 const useNativeFilterScopes = () => {
   const nativeFilters = useSelector<RootState, Filters>(
     state => state.nativeFilters?.filters,
   );
-  return useMemo(
+  const scopeKey = useMemo(
     () =>
       nativeFilters
-        ? Object.values(nativeFilters).map((filter: Filter) =>
-            pick(filter, ['id', 'scope', 'type']),
+        ? JSON.stringify(
+            Object.values(nativeFilters).map(filter =>
+              pick(filter, ['id', 'scope', 'type']),
+            ),
           )
-        : [],
-    [JSON.stringify(nativeFilters)],
+        : '[]',
+    [nativeFilters],
+  );
+  return useMemo(
+    () => (scopeKey === '[]' ? [] : JSON.parse(scopeKey)),
+    [scopeKey],
   );
 };
 
 const DashboardContainer: FC<DashboardContainerProps> = ({ topLevelTabs }) => {
   const nativeFilterScopes = useNativeFilterScopes();
   const dispatch = useDispatch();
+  const prevFilterScopesRef = useRef<
+    {
+      filterId: string;
+      chartsInScope: number[];
+      tabsInScope: string[];
+    }[]
+  >([]);
 
   const dashboardLayout = useSelector<RootState, DashboardLayout>(
     state => state.dashboardLayout.present,
@@ -87,22 +101,27 @@ const DashboardContainer: FC<DashboardContainerProps> = ({ topLevelTabs }) => {
   const directPathToChild = useSelector<RootState, string[]>(
     state => state.dashboardState.directPathToChild,
   );
-  const chartIds = useSelector<RootState, number[]>(state =>
-    Object.values(state.charts).map(chart => chart.id),
+  // shallowEqual: avoid new number[] identity on every chart status tick
+  // (would re-run the scope effect → Maximum update depth / React #185).
+  const chartIds = useSelector<RootState, number[]>(
+    state => Object.values(state.charts).map(chart => chart.id),
+    shallowEqual,
   );
-  const renderedChartIds = useSelector<RootState, number[]>(state =>
-    Object.values(state.charts)
-      .filter(chart => chart.chartStatus === 'rendered')
-      .map(chart => chart.id),
+  const renderedChartIds = useSelector<RootState, number[]>(
+    state =>
+      Object.values(state.charts)
+        .filter(chart => chart.chartStatus === 'rendered')
+        .map(chart => chart.id),
+    shallowEqual,
   );
   const [dashboardLabelsColorInitiated, setDashboardLabelsColorInitiated] =
     useState(false);
   const prevRenderedChartIds = useRef<number[]>([]);
-  const prevTabIndexRef = useRef();
+  const prevTabIndexRef = useRef<number | undefined>();
   const tabIndex = useMemo(() => {
     const nextTabIndex = findTabIndexByComponentId({
       currentComponent: getRootLevelTabsComponent(dashboardLayout),
-      directPathToChild,
+      directPathToChild: directPathToChild ?? [],
     });
 
     if (nextTabIndex === -1) {
@@ -151,10 +170,12 @@ const DashboardContainer: FC<DashboardContainerProps> = ({ topLevelTabs }) => {
         chartsInScope,
       };
     });
+    // Skip no-op dispatches (prevents update loops after charts re-render).
+    if (isEqual(scopes, prevFilterScopesRef.current)) {
+      return;
+    }
+    prevFilterScopesRef.current = scopes;
     dispatch(setInScopeStatusOfFilters(scopes));
-    // chartIds must be a dependency: charts can load after layout is ready.
-    // Without it, chartsInScope stays empty → filters land in
-    // "Filters out of scope" and/or fail to apply to the intended charts.
   }, [nativeFilterScopes, dashboardLayout, chartIds, dispatch]);
 
   const childIds: string[] = topLevelTabs

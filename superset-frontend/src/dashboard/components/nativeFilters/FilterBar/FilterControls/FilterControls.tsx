@@ -297,6 +297,16 @@ const FilterControls: FC<FilterControlsProps> = ({
   );
 
   const overflowedByIndex = useMemo(() => {
+    // Horizontal bar: filters that overflow into "More filters" (or out of
+    // scope inside that menu) need overflow=true for popup/layout sizing.
+    // Vertical bar: never mark filters as overflow. Out-of-scope time/select
+    // filters previously got overflow=true which parented popovers inside the
+    // left sidebar (overflow:auto) and trapped the UI when editing
+    // "Filters out of scope".
+    if (filterBarOrientation !== FilterBarOrientation.Horizontal) {
+      return filtersWithValues.map(() => false);
+    }
+
     const filtersOutOfScopeIds = new Set(filtersOutOfScope.map(({ id }) => id));
     const overflowedFiltersInScopeIds = new Set(
       overflowedFiltersInScope.map(({ id }) => id),
@@ -307,7 +317,12 @@ const FilterControls: FC<FilterControlsProps> = ({
         filtersOutOfScopeIds.has(filter.id) ||
         overflowedFiltersInScopeIds.has(filter.id),
     );
-  }, [filtersOutOfScope, filtersWithValues, overflowedFiltersInScope]);
+  }, [
+    filterBarOrientation,
+    filtersOutOfScope,
+    filtersWithValues,
+    overflowedFiltersInScope,
+  ]);
 
   useEffect(() => {
     if (outlinedFilterId && overflowedIds.includes(outlinedFilterId)) {
