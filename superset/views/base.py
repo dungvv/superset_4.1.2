@@ -27,6 +27,7 @@ import yaml
 from babel import Locale
 from flask import (
     abort,
+    current_app,
     flash,
     g,
     get_flashed_messages,
@@ -548,11 +549,37 @@ class DatasourceFilter(BaseFilter):  # pylint: disable=too-few-public-methods
 
 class CsvResponse(Response):
     """
-    Override Response to take into account csv encoding from config.py
+    CSV download response.
+
+    pandas.to_csv() returns a Python str and ignores encoding when not writing
+    to a file. Werkzeug 2.3+ also ignores Response.charset and always encodes
+    UTF-8, so setting charset = CSV_EXPORT["encoding"] does not add a BOM.
+
+    Encode to bytes here so CSV_EXPORT encoding (utf-8-sig) actually reaches
+    the downloaded file — required for Excel on Windows to show Lao text.
     """
 
-    charset = conf["CSV_EXPORT"].get("encoding", "utf-8")
     default_mimetype = "text/csv"
+
+    def __init__(self, response: Any = None, *args: Any, **kwargs: Any) -> None:
+        encoding = "utf-8-sig"
+        try:
+            encoding = current_app.config.get("CSV_EXPORT", {}).get(
+                "encoding", "utf-8-sig"
+            )
+        except RuntimeError:
+            pass
+
+        if isinstance(response, str):
+            response = response.encode(encoding)
+        elif (
+            isinstance(response, (bytes, bytearray))
+            and str(encoding).lower().replace("-", "_") == "utf_8_sig"
+            and not bytes(response).startswith(b"\xef\xbb\xbf")
+        ):
+            response = b"\xef\xbb\xbf" + bytes(response)
+
+        super().__init__(response, *args, **kwargs)
 
 
 class XlsxResponse(Response):
