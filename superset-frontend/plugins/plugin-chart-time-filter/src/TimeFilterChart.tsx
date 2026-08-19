@@ -1,5 +1,4 @@
 import {
-  type ChangeEvent,
   useState,
   useCallback,
   useMemo,
@@ -7,6 +6,10 @@ import {
   useRef,
 } from 'react';
 import { styled } from '@superset-ui/core';
+import { DatePicker as AntdDatePicker } from 'antd';
+import type { Moment } from 'moment';
+import moment from 'moment';
+import Select from 'src/components/Select/Select';
 import { TimeFilterVizProps } from './types';
 
 const Container = styled.div`
@@ -28,31 +31,12 @@ const Label = styled.label`
   color: ${({ theme }) => theme.colors.grayscale.dark1};
 `;
 
-const Select = styled.select`
+const StyledDatePicker = styled(AntdDatePicker)`
   width: 100%;
-  padding: 6px 8px;
-  font-size: 13px;
-  border: 1px solid ${({ theme }) => theme.colors.grayscale.light2};
-  border-radius: 4px;
-  background: ${({ theme }) => theme.colors.grayscale.light5};
-  box-sizing: border-box;
-  &:focus {
-    border-color: ${({ theme }) => theme.colors.primary.base};
-    outline: none;
-  }
-`;
+  border-radius: ${({ theme }) => theme.gridUnit}px;
 
-const Input = styled.input`
-  width: 100%;
-  padding: 6px 8px;
-  font-size: 13px;
-  border: 1px solid ${({ theme }) => theme.colors.grayscale.light2};
-  border-radius: 4px;
-  background: ${({ theme }) => theme.colors.grayscale.light5};
-  box-sizing: border-box;
-  &:focus {
-    border-color: ${({ theme }) => theme.colors.primary.base};
-    outline: none;
+  .ant-picker-input > input {
+    font-size: 13px;
   }
 `;
 
@@ -94,32 +78,11 @@ const CustomDateGrid = styled.div`
 
 const GRAIN_OPTIONS: { value: string; label: string }[] = [
   { value: 'day', label: 'Ngày' },
+  { value: 'week', label: 'Tuần' },
   { value: 'month', label: 'Tháng' },
   { value: 'quarter', label: 'Quý' },
   { value: 'year', label: 'Năm' },
   { value: 'custom', label: 'Custom' },
-];
-
-const MONTHS = [
-  { value: '01', label: 'Jan' },
-  { value: '02', label: 'Feb' },
-  { value: '03', label: 'Mar' },
-  { value: '04', label: 'Apr' },
-  { value: '05', label: 'May' },
-  { value: '06', label: 'Jun' },
-  { value: '07', label: 'Jul' },
-  { value: '08', label: 'Aug' },
-  { value: '09', label: 'Sep' },
-  { value: '10', label: 'Oct' },
-  { value: '11', label: 'Nov' },
-  { value: '12', label: 'Dec' },
-];
-
-const QUARTERS = [
-  { value: 'Q1', label: 'Q1' },
-  { value: 'Q2', label: 'Q2' },
-  { value: 'Q3', label: 'Q3' },
-  { value: 'Q4', label: 'Q4' },
 ];
 
 type TimeGroup = 'day' | 'month';
@@ -128,14 +91,6 @@ type DateBounds = {
   startDate: string;
   endDate: string;
 };
-
-function generateYearOptions(maxY: number): string[] {
-  const years: string[] = [];
-  for (let y = maxY - 5; y <= maxY; y += 1) {
-    years.push(String(y));
-  }
-  return years;
-}
 
 function formatDate(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(
@@ -276,6 +231,13 @@ function computeDateBounds(
       }
       return { startDate: params.startDate, endDate: params.endDate };
     }
+    case 'week': {
+      if (!isValidDateStr(params.weekStart)) return null;
+      return {
+        startDate: params.weekStart,
+        endDate: addDays(params.weekStart, 6),
+      };
+    }
     default:
       return null;
   }
@@ -334,6 +296,14 @@ function computeComparisonDateBounds(
         startDate: params.compareStartDate,
         endDate: params.compareEndDate,
       };
+    case 'week': {
+      if (!isValidDateStr(params.weekStart)) return null;
+      const prevWeekStart = addDays(params.weekStart, -7);
+      return {
+        startDate: prevWeekStart,
+        endDate: addDays(prevWeekStart, 6),
+      };
+    }
     default:
       return null;
   }
@@ -361,6 +331,8 @@ function computeGrainValue(
       return `${params.year}-${params.quarter}`;
     case 'year':
       return params.year || '';
+    case 'week':
+      return params.weekStart || '';
     case 'custom':
       return `${params.startDate || ''} : ${params.endDate || ''}`;
     default:
@@ -465,6 +437,14 @@ function resolveInitialParamsFromUrl(
         : getUrlParam(urlParams, 'current_start_date').slice(0, 4);
       return /^\d{4}$/.test(year) ? { grain, params: { year } } : null;
     }
+    case 'week': {
+      const weekStart = isValidDateStr(grainValue)
+        ? grainValue
+        : getUrlParam(urlParams, 'current_start_date');
+      return isValidDateStr(weekStart)
+        ? { grain, params: { weekStart } }
+        : null;
+    }
     case 'custom': {
       const startDate = getUrlParam(urlParams, 'current_start_date');
       const endDate = getUrlParam(urlParams, 'current_end_date');
@@ -521,6 +501,8 @@ export default function TimeFilterChart(props: TimeFilterVizProps) {
 
   const [grain, setGrain] = useState('day');
   const [dayValue, setDayValue] = useState(formatDate(maxDate));
+  const [weekStartDate, setWeekStartDate] = useState('');
+  const [weekEndDate, setWeekEndDate] = useState('');
   const [monthValue, setMonthValue] = useState(maxMonth);
   const [monthYear, setMonthYear] = useState(String(maxYear));
   const [quarterValue, setQuarterValue] = useState(maxQtr);
@@ -567,6 +549,10 @@ export default function TimeFilterChart(props: TimeFilterVizProps) {
       case 'year':
         setYearValue(params.year);
         break;
+      case 'week':
+        setWeekStartDate(params.weekStart);
+        setWeekEndDate(addDays(params.weekStart, 6));
+        break;
       case 'custom':
         setCustomStartDate(params.startDate);
         setCustomEndDate(params.endDate);
@@ -579,8 +565,6 @@ export default function TimeFilterChart(props: TimeFilterVizProps) {
     setIsReady(true);
   }, [maxDate]);
 
-  const years = useMemo(() => generateYearOptions(maxYear), [maxYear]);
-
   const getParams = useCallback((): Record<string, string> => {
     switch (grain) {
       case 'day':
@@ -591,6 +575,8 @@ export default function TimeFilterChart(props: TimeFilterVizProps) {
         return { quarter: quarterValue, year: quarterYear };
       case 'year':
         return { year: yearValue };
+      case 'week':
+        return { weekStart: weekStartDate };
       case 'custom':
         return {
           startDate: customStartDate,
@@ -604,6 +590,7 @@ export default function TimeFilterChart(props: TimeFilterVizProps) {
   }, [
     grain,
     dayValue,
+    weekStartDate,
     monthValue,
     monthYear,
     quarterValue,
@@ -701,6 +688,7 @@ export default function TimeFilterChart(props: TimeFilterVizProps) {
     isReady,
     grain,
     dayValue,
+    weekStartDate,
     monthValue,
     monthYear,
     quarterValue,
@@ -715,10 +703,9 @@ export default function TimeFilterChart(props: TimeFilterVizProps) {
     getParams,
   ]);
 
-  const handleGrainChange = (e: ChangeEvent<HTMLSelectElement>) => {
-    const nextGrain = e.target.value;
-    shouldReloadRef.current = nextGrain !== 'custom';
-    setGrain(nextGrain);
+  const handleGrainChange = (value: string) => {
+    shouldReloadRef.current = value !== 'custom';
+    setGrain(value);
   };
 
   const handleValueChange = useCallback((change: () => void) => {
@@ -749,131 +736,120 @@ export default function TimeFilterChart(props: TimeFilterVizProps) {
   const renderDayPicker = () => (
     <Col>
       <Label>Day</Label>
-      <Input
-        type="date"
-        value={dayValue}
-        onChange={e => handleValueChange(() => setDayValue(e.target.value))}
+      <StyledDatePicker
+        value={dayValue ? moment(dayValue) : null}
+        onChange={(date: Moment | null) =>
+          handleValueChange(() => setDayValue(date ? date.format('YYYY-MM-DD') : ''))
+        }
       />
     </Col>
+  );
+
+  const renderWeekPicker = () => (
+    <Row>
+      <Col>
+        <Label>Start date</Label>
+        <StyledDatePicker
+          value={weekStartDate ? moment(weekStartDate) : null}
+          onChange={(date: Moment | null) => {
+            const start = date ? date.format('YYYY-MM-DD') : '';
+            handleValueChange(() => {
+              setWeekStartDate(start);
+              setWeekEndDate(start ? addDays(start, 6) : '');
+            });
+          }}
+        />
+      </Col>
+      <Col>
+        <Label>End date</Label>
+        <StyledDatePicker
+          value={weekEndDate ? moment(weekEndDate) : null}
+          onChange={(date: Moment | null) =>
+            handleValueChange(() => setWeekEndDate(date ? date.format('YYYY-MM-DD') : ''))
+          }
+        />
+      </Col>
+    </Row>
   );
 
   const renderYearPicker = () => (
     <Col>
       <Label>Year</Label>
-      <Select
-        value={yearValue}
-        onChange={e => handleValueChange(() => setYearValue(e.target.value))}
-      >
-        {years.map(y => (
-          <option key={y} value={y}>
-            {y}
-          </option>
-        ))}
-      </Select>
+      <StyledDatePicker
+        picker="year"
+        value={yearValue ? moment(yearValue, 'YYYY') : null}
+        onChange={(date: Moment | null) =>
+          handleValueChange(() => setYearValue(date ? date.format('YYYY') : ''))
+        }
+      />
     </Col>
   );
 
   const renderMonthPicker = () => (
-    <Row>
-      <Col>
-        <Label>Month</Label>
-        <Select
-          value={monthValue}
-          onChange={e => handleValueChange(() => setMonthValue(e.target.value))}
-        >
-          {MONTHS.map(m => (
-            <option key={m.value} value={m.value}>
-              {m.label}
-            </option>
-          ))}
-        </Select>
-      </Col>
-      <Col>
-        <Label>Year</Label>
-        <Select
-          value={monthYear}
-          onChange={e => handleValueChange(() => setMonthYear(e.target.value))}
-        >
-          {years.map(y => (
-            <option key={y} value={y}>
-              {y}
-            </option>
-          ))}
-        </Select>
-      </Col>
-    </Row>
+    <Col>
+      <Label>Month</Label>
+      <StyledDatePicker
+        picker="month"
+        value={monthYear && monthValue ? moment(`${monthYear}-${monthValue}`, 'YYYY-MM') : null}
+        onChange={(date: Moment | null) => {
+          handleValueChange(() => {
+            setMonthValue(date ? date.format('MM') : '');
+            setMonthYear(date ? date.format('YYYY') : '');
+          });
+        }}
+      />
+    </Col>
   );
 
   const renderQuarterPicker = () => (
-    <Row>
-      <Col>
-        <Label>Quarter</Label>
-        <Select
-          value={quarterValue}
-          onChange={e =>
-            handleValueChange(() => setQuarterValue(e.target.value))
-          }
-        >
-          {QUARTERS.map(q => (
-            <option key={q.value} value={q.value}>
-              {q.label}
-            </option>
-          ))}
-        </Select>
-      </Col>
-      <Col>
-        <Label>Year</Label>
-        <Select
-          value={quarterYear}
-          onChange={e =>
-            handleValueChange(() => setQuarterYear(e.target.value))
-          }
-        >
-          {years.map(y => (
-            <option key={y} value={y}>
-              {y}
-            </option>
-          ))}
-        </Select>
-      </Col>
-    </Row>
+    <Col>
+      <Label>Quarter</Label>
+      <StyledDatePicker
+        picker="quarter"
+        value={quarterYear && quarterValue
+          ? moment(`${quarterYear}-${quarterValue}`, 'YYYY-[Q]Q')
+          : null}
+        onChange={(date: Moment | null) => {
+          handleValueChange(() => {
+            setQuarterValue(date ? `Q${date.quarter()}` : '');
+            setQuarterYear(date ? date.format('YYYY') : '');
+          });
+        }}
+      />
+    </Col>
   );
 
   const renderCustomPicker = () => (
     <CustomDateGrid>
       <HalfCol>
         <Label>Start date</Label>
-        <Input
-          type="date"
-          value={customStartDate}
-          onChange={e => setCustomStartDate(e.target.value)}
+        <StyledDatePicker
+          value={customStartDate ? moment(customStartDate) : null}
+          onChange={(date: Moment | null) => setCustomStartDate(date ? date.format('YYYY-MM-DD') : '')}
           onBlur={handleCustomDateCommit}
         />
       </HalfCol>
       <HalfCol>
         <Label>End date</Label>
-        <Input
-          type="date"
-          value={customEndDate}
-          onChange={e => setCustomEndDate(e.target.value)}
+        <StyledDatePicker
+          value={customEndDate ? moment(customEndDate) : null}
+          onChange={(date: Moment | null) => setCustomEndDate(date ? date.format('YYYY-MM-DD') : '')}
           onBlur={handleCustomDateCommit}
         />
       </HalfCol>
       <HalfCol>
         <Label>Compare start</Label>
-        <Input
-          type="date"
-          value={compareStartDate}
-          onChange={e => setCompareStartDate(e.target.value)}
+        <StyledDatePicker
+          value={compareStartDate ? moment(compareStartDate) : null}
+          onChange={(date: Moment | null) => setCompareStartDate(date ? date.format('YYYY-MM-DD') : '')}
           onBlur={handleCustomDateCommit}
         />
       </HalfCol>
       <HalfCol>
         <Label>Compare end</Label>
-        <Input
-          type="date"
-          value={compareEndDate}
-          onChange={e => setCompareEndDate(e.target.value)}
+        <StyledDatePicker
+          value={compareEndDate ? moment(compareEndDate) : null}
+          onChange={(date: Moment | null) => setCompareEndDate(date ? date.format('YYYY-MM-DD') : '')}
           onBlur={handleCustomDateCommit}
         />
       </HalfCol>
@@ -884,6 +860,8 @@ export default function TimeFilterChart(props: TimeFilterVizProps) {
     switch (grain) {
       case 'day':
         return renderDayPicker();
+      case 'week':
+        return renderWeekPicker();
       case 'month':
         return renderMonthPicker();
       case 'quarter':
@@ -902,17 +880,17 @@ export default function TimeFilterChart(props: TimeFilterVizProps) {
       <Row>
         <GrainCol>
           <Label>Time Grain</Label>
-          <Select value={grain} onChange={handleGrainChange}>
-            {GRAIN_OPTIONS.map(g => (
-              <option key={g.value} value={g.value}>
-                {g.label}
-              </option>
-            ))}
-          </Select>
+          <Select
+            ariaLabel="Time Grain"
+            options={GRAIN_OPTIONS}
+            value={grain}
+            onChange={handleGrainChange}
+            getPopupContainer={() => document.body}
+          />
         </GrainCol>
-        {grain !== 'custom' && renderValuePicker()}
+        {grain !== 'custom' && grain !== 'week' && renderValuePicker()}
       </Row>
-      {grain === 'custom' && renderValuePicker()}
+      {(grain === 'custom' || grain === 'week') && renderValuePicker()}
     </Container>
   );
 }

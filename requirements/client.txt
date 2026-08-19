@@ -1,0 +1,23 @@
+# Client-only dependencies for scripts/export_dashboard_word.py
+#
+# Deliberately separate from base.txt/development.txt: the client runs OUTSIDE
+# Superset (it drives the dashboard UI over HTTP), so it must not drag in the
+# whole server dependency tree.
+#
+# Versions match what is already installed in the unitel/superset-chrome image,
+# so the same wheels work in both places. See scripts/README-offline-install.md
+# for downloading these onto an air-gapped machine.
+#
+# NOTE: playwright 1.62.0 requires Python >= 3.10.
+
+playwright==1.62.0
+# Pinned by playwright: pyee<14,>=13 and greenlet<4.0.0,>=3.1.1
+pyee==13.0.1
+greenlet==3.1.1
+
+# Period maths is imported from export_dashboard_report.py, which uses requests.
+requests==2.32.2
+certifi==2024.2.2
+charset-normalizer==3.3.2
+idna==3.7
+urllib3==1.26.18

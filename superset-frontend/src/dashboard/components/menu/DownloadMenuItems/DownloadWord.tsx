@@ -162,13 +162,11 @@ async function captureChartImage(
     chartContainer.querySelector('[data-test-chart-name]');
   const rect = chartContainer.getBoundingClientRect();
 
-  const chartSlice = chartContainer.querySelector<HTMLElement>('.chart-slice');
-  const contentWidth = chartSlice
-    ? Math.ceil(chartSlice.getBoundingClientRect().width)
-    : rect.width;
-  const contentHeight = chartSlice
-    ? Math.ceil(chartSlice.getBoundingClientRect().height)
-    : rect.height;
+  // Must measure the element being rendered, not a descendant: dom-to-image
+  // overwrites the clone's width/height with these values rather than cropping,
+  // so a smaller size squashes the chart and clips the X axis off the bottom.
+  const contentWidth = Math.ceil(rect.width);
+  const contentHeight = Math.ceil(rect.height);
 
   const gridRow = chartContainer.style.gridRow || 'auto';
   const gridCol = chartContainer.style.gridColumn || 'auto';
@@ -473,33 +471,6 @@ export function formatDateDMY(isoDate: string): string {
   return `${day}/${month}/${year}`;
 }
 
-function getReportType(timeGrain: string): string {
-  switch (timeGrain) {
-    case 'day':
-      return 'NGÀY';
-    case 'week':
-      return 'TUẦN';
-    case 'month':
-      return 'THÁNG';
-    case 'quarter':
-      return 'QUÝ';
-    case 'year':
-      return 'NĂM';
-    case 'custom':
-      return 'TÙY CHỌN';
-    default:
-      return '';
-  }
-}
-
-function formatReportMonth(isoDate: string): string {
-  if (!isoDate || !/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) {
-    return '';
-  }
-  const [year, month] = isoDate.split('-');
-  return `${month}/${year}`;
-}
-
 export default function DownloadWord({
   dashboardId,
   dashboardTitle,
@@ -537,22 +508,18 @@ export default function DownloadWord({
       const currentEndDate = urlParams.get('current_end_date') || '';
       const timeGrain =
         urlParams.get('time_grain') || urlParams.get('timegrain') || '';
-      const reportType = getReportType(timeGrain);
-      const reportMonth = formatReportMonth(currentStartDate);
 
       const response = await SupersetClient.post({
         endpoint: `/api/v1/dashboard/${dashboardId}/export_word/`,
         jsonPayload: {
           charts,
           dashboard_title: dashboardTitle || 'Dashboard',
-          start_date: formatDateDMY(currentStartDate),
-          end_date: formatDateDMY(currentEndDate),
-          current_start_date: formatDateDMY(currentStartDate),
-          current_end_date: formatDateDMY(currentEndDate),
-          report_type: reportType,
-          report_month: reportMonth,
+          // Raw ISO dates: the server owns all label/date formatting
+          // (report_context.build_template_context).
+          time_grain: timeGrain,
+          current_start_date: currentStartDate,
+          current_end_date: currentEndDate,
           kpi_counts: kpiCounts,
-          ...kpiCounts,
         },
         parseMethod: 'raw',
         headers: {

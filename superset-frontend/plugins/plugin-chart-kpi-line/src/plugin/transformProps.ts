@@ -25,7 +25,8 @@ function getComparison(
   if (current === null || target === null) {
     return { direction: 'none', value: 0, noData: true };
   }
-  const diff = current - target;
+  const diff = Number((current - target).toFixed(2));
+  // (unchanged: internal, not displayed)
   const isGood =
     goalDirection === 'less_than' ? current <= target : current >= target;
 
@@ -44,9 +45,32 @@ function safeNumber(val: DataRecordValue): number | null {
   return Number.isNaN(num) ? null : num;
 }
 
-function computeRatio(numerator: number, denominator: number): number | null {
-  if (denominator <= 0) return null;
-  return (numerator / denominator) * 100;
+// vi-VN: decimal ',', thousands '.'.
+const VI = 'vi-VN';
+function fmtRatio(value: number): string {
+  return value.toLocaleString(VI, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+function fmtInt(value: number): string {
+  return value.toLocaleString(VI);
+}
+
+// Null total = missing data (null). Real zero total = no attempts, nothing
+// failed (100). Coercing null->0 upstream would conflate the two.
+function computeRatio(
+  numerator: number | null,
+  denominator: number | null,
+): number | null {
+  if (denominator === null) return null;
+  if (denominator <= 0) return 100;
+  const num = numerator ?? 0;
+  // Round to 2dp at source so display, tooltip, and comparisons agree.
+  const ratio = Number(((num / denominator) * 100).toFixed(2));
+  // A real gap (num < den) must never read as 100%, even when rounding says so
+  // (999999/1000000 -> 99.99, not 100). Only num >= den is a true 100%.
+  return ratio >= 100 && num < denominator ? 99.99 : ratio;
 }
 
 function getSeriesYValues(seriesList: SeriesDatum[][]): number[] {
@@ -58,54 +82,58 @@ function getSeriesYValues(seriesList: SeriesDatum[][]): number[] {
     );
 }
 
-function getYAxisMin(seriesList: SeriesDatum[][]): number | undefined {
+// Padding is driven by the data's RANGE, not its magnitude: for percentage
+// metrics |max| dwarfs the range, so scaling by magnitude flattened the lines
+// into ~9% of the chart height. The extra headroom on top leaves room for the
+// point labels, which sit above the line.
+function getYAxisBounds(seriesList: SeriesDatum[][]): {
+  min: number | undefined;
+  max: number | undefined;
+} {
   const values = getSeriesYValues(seriesList);
-  if (values.length === 0) return undefined;
+  if (values.length === 0) return { min: undefined, max: undefined };
 
   const minValue = Math.min(...values);
   const maxValue = Math.max(...values);
-  const range = Math.abs(maxValue - minValue);
-  const paddingBase = Math.max(
-    Math.abs(minValue),
-    Math.abs(maxValue),
-    range,
-    1,
+  // The relative and absolute floors keep near-flat data from collapsing to a
+  // zero-height axis, which ECharts cannot draw.
+  const padding = Math.max(
+    (maxValue - minValue) * 0.18,
+    Math.abs(maxValue) * 0.005,
+    0.25,
   );
 
-  const padding = paddingBase * 0.1;
-  if (minValue >= 0) {
-    return Math.max(0, minValue - padding);
-  }
-  return minValue - padding;
-}
-
-function getYAxisMax(seriesList: SeriesDatum[][]): number | undefined {
-  const values = getSeriesYValues(seriesList);
-  if (values.length === 0) return undefined;
-
-  const minValue = Math.min(...values);
-  const maxValue = Math.max(...values);
-  const range = Math.abs(maxValue - minValue);
-  const paddingBase = Math.max(
-    Math.abs(minValue),
-    Math.abs(maxValue),
-    range,
-    1,
-  );
-
-  return maxValue + paddingBase * 0.1;
+  return {
+    min: minValue >= 0 ? Math.max(0, minValue - padding) : minValue - padding,
+    max: maxValue + padding * 2,
+  };
 }
 
 function formatXAxisLabel(value: string): string {
   const label = String(value);
+  // SQL emits ISO so labels sort chronologically; display as DD/MM.
+  const iso = label.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) {
+    return `${iso[3]}/${iso[2]}`;
+  }
   return label.length > 18 ? `${label.slice(0, 18)}...` : label;
 }
-function getXAxisLabelInterval(totalTicks: number): number | ((index: number) => boolean) {
-  if (totalTicks <= 10) {
-    return 0;
-  }
+function getXAxisLabelInterval(totalLabels: number): number {
+  return totalLabels > 12 ? 2 : 0;
+}
 
-  return (index: number) => index % 2 === 0;
+// Show every (step+1)th label counted from the LAST value so max is always
+// shown, mirroring getXAxisLabelInterval's step but anchored at the end.
+function getXAxisLabelIntervalFn(
+  totalLabels: number,
+): (index: number) => boolean {
+  const step = getXAxisLabelInterval(totalLabels) + 1;
+  const last = totalLabels - 1;
+  return (index: number) => (last - index) % step === 0;
+}
+
+function getLineValueLabelInterval(totalPoints: number): number {
+  return totalPoints > 15 ? 3 : 1;
 }
 
 
@@ -169,25 +197,38 @@ export default function transformProps(
     prevRatio = prevVal;
     currentAbsolute =
       currentRatio !== null
-        ? `${currentRatio.toFixed(2)}${resolvedBigNumberUnit}`
+        ? `${fmtRatio(currentRatio)}${resolvedBigNumberUnit}`
         : 'N/A';
   } else {
     const curSuccVal = extractVal(kpiRow, curIdx);
     const curTotVal = extractVal(kpiRow, curTotIdx);
     const prevSuccVal = extractVal(kpiRow, prevIdx);
     const prevTotVal = extractVal(kpiRow, prevTotIdx);
-    currentRatio = computeRatio(curSuccVal ?? 0, curTotVal ?? 0);
-    prevRatio = computeRatio(prevSuccVal ?? 0, prevTotVal ?? 0);
+    currentRatio = computeRatio(curSuccVal, curTotVal);
+    prevRatio = computeRatio(prevSuccVal, prevTotVal);
     currentAbsolute =
       currentRatio !== null
-        ? `${(curSuccVal ?? 0).toLocaleString()}/${(
-            curTotVal ?? 0
-          ).toLocaleString()}`
+        ? `${fmtInt(curSuccVal ?? 0)}/${fmtInt(curTotVal ?? 0)}`
         : 'N/A';
   }
 
-  const chartRows = rows.slice(1);
   const avgKpi = kpiVal;
+
+  // rows[0] is the KPI/current-period summary, rows[1] the month-to-date
+  // figures; neither is a point on the line, so the series start at rows[2].
+  const monthToDateRow = rows.length > 1 ? rows[1] : null;
+  const chartRows = rows.slice(2);
+  const monthToDateRatio = monthToDateRow
+    ? isThreeMetric
+      ? extractVal(monthToDateRow, curIdx)
+      : (() => {
+        const s = extractVal(monthToDateRow, curIdx);
+        const t = extractVal(monthToDateRow, curTotIdx);
+        // Both null = SQL blanked the MTD row (grain not week/custom).
+        // Only floor to 100 when the row actually carries data.
+        return s === null && t === null ? null : computeRatio(s, t);
+      })()
+    : null;
 
   const kpiSeries: SeriesDatum[] = [];
   const currentSeries: SeriesDatum[] = [];
@@ -238,6 +279,11 @@ export default function transformProps(
     prevRatio,
     kpiGoalDirection,
   );
+  const monthToDateComparison = getComparison(
+    monthToDateRatio,
+    avgKpi,
+    kpiGoalDirection,
+  );
 
   const numberFormatter = getValueFormatter(
     '',
@@ -255,8 +301,11 @@ export default function transformProps(
   const firstX = allXValues.length > 0 ? allXValues[0] : '';
   const lastX = allXValues.length > 0 ? allXValues[allXValues.length - 1] : '';
   const firstKpiPoint = kpiSeries.find(datum => datum[1] !== null);
-  const yAxisMin = getYAxisMin([kpiSeries, currentSeries, prevSeries]);
-  const yAxisMax = getYAxisMax([kpiSeries, currentSeries, prevSeries]);
+  const { min: yAxisMin, max: yAxisMax } = getYAxisBounds([
+    kpiSeries,
+    currentSeries,
+    prevSeries,
+  ]);
 
   const series: any[] = [
     {
@@ -282,11 +331,13 @@ export default function transformProps(
             return '';
           }
 
-          const shouldShowLabel =
-            xAxisLabels.length <= 10 ? true : p.dataIndex % 2 === 0;
-          return shouldShowLabel ? Number(value).toFixed(2) : '';
+          const interval = getLineValueLabelInterval(xAxisLabels.length);
+          return p.dataIndex % interval === 0 ? fmtRatio(Number(value)) : '';
         },
       },
+      // Interval thinning alone cannot prevent collisions: neighbouring labels
+      // still touch when the line is steep or the chart is narrow.
+      labelLayout: { hideOverlap: true },
       emphasis: {
         label: { show: true },
       },
@@ -324,24 +375,24 @@ export default function transformProps(
       itemStyle: { color: '#2CA02C' },
       markPoint: firstKpiPoint
         ? {
-            symbol: 'circle',
-            symbolSize: 1,
-            itemStyle: { color: 'transparent', opacity: 0 },
-            label: {
-              show: true,
-              position: 'right',
-              color: '#2CA02C',
-              fontSize: 15,
-              fontWeight: 600,
-              formatter: () => Number(firstKpiPoint[1]).toFixed(2),
-              offset: [8, 0],
+          symbol: 'circle',
+          symbolSize: 1,
+          //itemStyle: { color: 'transparent', opacity: 0 },
+          label: {
+            show: true,
+            position: 'top',
+            color: '#2CA02C',
+            fontSize: 15,
+            fontWeight: 600,
+            formatter: () => fmtRatio(Number(firstKpiPoint[1])),
+            offset: [0, -4],
+          },
+          data: [
+            {
+              coord: [firstKpiPoint[0], firstKpiPoint[1]],
             },
-            data: [
-              {
-                coord: [firstKpiPoint[0], firstKpiPoint[1]],
-              },
-            ],
-          }
+          ],
+        }
         : undefined,
     });
   }
@@ -374,7 +425,7 @@ export default function transformProps(
         fontSize: AXIS_FONT_SIZE,
         formatter: formatXAxisLabel,
         hideOverlap: true,
-        interval: getXAxisLabelInterval(xAxisLabels.length),
+        interval: getXAxisLabelIntervalFn(xAxisLabels.length),
         margin: 12,
         overflow: 'truncate',
         rotate: 0,
@@ -398,18 +449,18 @@ export default function transformProps(
       trigger: 'axis',
       formatter: (params: any) => {
         if (!Array.isArray(params)) return '';
-        let html = `${params[0].name}<br/>`;
+        let html = `${formatXAxisLabel(params[0].name)}<br/>`;
         params.forEach((p: any) => {
           const value = p.data[1];
-          const val = value !== null ? Number(value).toFixed(2) : 'N/A';
+          const val = value !== null ? fmtRatio(Number(value)) : 'N/A';
           if (isThreeMetric) {
             html += `${p.marker} ${p.seriesName}: ${val}<br/>`;
           } else {
             const raw =
               p.data[2] !== undefined && p.data[3] !== undefined
-                ? ` (${Number(p.data[2]).toLocaleString()} / ${Number(
-                    p.data[3],
-                  ).toLocaleString()})`
+                ? ` (${fmtInt(Number(p.data[2]))} / ${fmtInt(
+                  Number(p.data[3]),
+                )})`
                 : '';
             html += `${p.marker} ${p.seriesName}: ${val}%${raw}<br/>`;
           }
@@ -429,11 +480,11 @@ export default function transformProps(
     },
     toolbox: zoomable
       ? {
-          show: true,
-          feature: {
-            dataZoom: { yAxisIndex: 'none' },
-          },
-        }
+        show: true,
+        feature: {
+          dataZoom: { yAxisIndex: 'none' },
+        },
+      }
       : undefined,
     dataZoom: zoomable
       ? [{ type: 'slider', start: 0, end: 100 }, { type: 'inside' }]
@@ -450,19 +501,22 @@ export default function transformProps(
     kpiGroup,
     currentRatio,
     currentAbsolute,
+    showCurrentAbsolute: !isThreeMetric,
     prevRatio,
     kpiTarget: avgKpi,
     bigNumberUnit: resolvedBigNumberUnit,
     kpiComparison,
     prevPeriodComparison,
+    monthToDateRatio,
+    monthToDateComparison,
     currentSeries,
     prevSeries,
     kpiTargetSeries:
       kpiSeries.length > 0
         ? [
-            [firstX, kpiSeries[0][1]],
-            [lastX, kpiSeries[kpiSeries.length - 1][1]],
-          ]
+          [firstX, kpiSeries[0][1]],
+          [lastX, kpiSeries[kpiSeries.length - 1][1]],
+        ]
         : [],
     echartOptions,
     formData,

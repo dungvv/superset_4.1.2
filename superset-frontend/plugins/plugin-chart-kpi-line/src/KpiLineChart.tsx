@@ -108,15 +108,22 @@ const GOOD_COLOR = '#2CA02C';
 const BAD_COLOR = '#D62728';
 const NEUTRAL_COLOR = '#1978D4';
 
-function getPreviousPeriodLabel(): string {
-  if (typeof window === 'undefined') return 'kỳ trước';
+function getTimeGrain(): string {
+  if (typeof window === 'undefined') return '';
+  return new URLSearchParams(window.location.search).get('time_grain') || '';
+}
 
-  const timeGrain = new URLSearchParams(window.location.search).get(
-    'time_grain',
-  );
-  return timeGrain === 'day' || timeGrain === 'month'
+function getPreviousPeriodLabel(): string {
+  const timeGrain = getTimeGrain();
+  return timeGrain === 'day' || timeGrain === 'month' || timeGrain === 'custom'
     ? 'cùng kỳ tháng trước'
     : 'kỳ trước';
+}
+
+// Month-to-date only makes sense on week-like reports (WEEK_LIKE_GRAINS in report_context.py)
+function isWeekLikeGrain(): boolean {
+  const timeGrain = getTimeGrain();
+  return timeGrain === 'week' || timeGrain === 'custom';
 }
 
 function openDetailUrlWithCurrentFilters(detailUrl: string): boolean {
@@ -154,11 +161,14 @@ export default function KpiLineChart(props: KpiLineVizProps) {
     kpiGroup,
     currentRatio,
     currentAbsolute,
+    showCurrentAbsolute,
     prevRatio,
     kpiTarget,
     bigNumberUnit,
     kpiComparison,
     prevPeriodComparison,
+    monthToDateRatio,
+    monthToDateComparison,
     echartOptions,
     onContextMenu,
   } = props;
@@ -170,6 +180,11 @@ export default function KpiLineChart(props: KpiLineVizProps) {
   const chartHeight = height - kpiCardHeight;
   const chartDisplayHeight = Math.max(0, chartHeight - CHART_TOP_GAP);
   const previousPeriodLabel = getPreviousPeriodLabel();
+  const showMonthToDate = isWeekLikeGrain() && monthToDateRatio !== null;
+  const allComparisonsNoData =
+    kpiComparison.noData &&
+    prevPeriodComparison.noData &&
+    (!showMonthToDate || monthToDateComparison.noData);
   const hasDetailUrl = detailUrl.trim().length > 0;
   const kpiStatus = kpiComparison.noData
     ? 'no_data'
@@ -178,7 +193,10 @@ export default function KpiLineChart(props: KpiLineVizProps) {
       : 'failed';
   const formatKpiValue = (value: number | null) =>
     value !== null
-      ? `${value.toFixed(2)}${bigNumberUnit}`
+      ? `${value.toLocaleString('vi-VN', {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })}${bigNumberUnit}`
       : 'N/A';
 
   useEffect(() => {
@@ -218,6 +236,7 @@ export default function KpiLineChart(props: KpiLineVizProps) {
     },
     targetLabel: string,
     targetValue: number | null,
+    prefix?: string,
   ) => {
     const formattedTargetValue =
       targetValue !== null ? (
@@ -229,7 +248,9 @@ export default function KpiLineChart(props: KpiLineVizProps) {
 
     if (comparison.noData) {
       return (
-        <ComparisonLine>Không có dữ liệu so với {targetLabel}</ComparisonLine>
+        <ComparisonLine>
+          {prefix}Không có dữ liệu so với {targetLabel}
+        </ComparisonLine>
       );
     }
     const iconColor =
@@ -242,31 +263,18 @@ export default function KpiLineChart(props: KpiLineVizProps) {
         : comparison.isGood
           ? GOOD_COLOR
           : BAD_COLOR;
-    const directionIcon =
-      comparison.direction === 'up'
-        ? '▲'
-        : comparison.direction === 'down'
-          ? '▼'
-          : '';
-    const directionText =
-      comparison.direction === 'up'
-        ? 'Tăng'
-        : comparison.direction === 'down'
-          ? 'Giảm'
-          : 'Không đổi';
+    const directionIcon = comparison.isGood ? '▲' : '▼';
     if (comparison.direction === 'none') {
       return (
         <ComparisonLine>
-          <span style={{ color: iconColor, marginRight: 4 }}>
-            {directionIcon}
-          </span>
-          {directionText} so với {targetLabel}
+          {prefix}Không đổi so với {targetLabel}
           {formattedTargetValue}
         </ComparisonLine>
       );
     }
     return (
       <ComparisonLine>
+        {prefix}
         <span style={{ color: iconColor, marginRight: 4 }}>
           {directionIcon}
         </span>
@@ -339,14 +347,29 @@ export default function KpiLineChart(props: KpiLineVizProps) {
             {formatKpiValue(currentRatio)}
           </BigNumber>
         </BigNumberRow>
-        <AbsoluteNumber>({currentAbsolute})</AbsoluteNumber>
+        {showCurrentAbsolute && (
+          <AbsoluteNumber>({currentAbsolute})</AbsoluteNumber>
+        )}
         <Spacer />
         <ComparisonBlock>
-          {renderComparisonText(kpiComparison, 'KPI', kpiTarget)}
-          {renderComparisonText(
-            prevPeriodComparison,
-            previousPeriodLabel,
-            prevRatio,
+          {allComparisonsNoData ? (
+            <ComparisonLine>Không có dữ liệu</ComparisonLine>
+          ) : (
+            <>
+              {renderComparisonText(kpiComparison, 'KPI', kpiTarget)}
+              {renderComparisonText(
+                prevPeriodComparison,
+                previousPeriodLabel,
+                prevRatio,
+              )}
+              {showMonthToDate &&
+                renderComparisonText(
+                  monthToDateComparison,
+                  'KPI',
+                  null,
+                  `Luỹ kế tháng ${formatKpiValue(monthToDateRatio)} `,
+                )}
+            </>
           )}
         </ComparisonBlock>
       </KpiCard>

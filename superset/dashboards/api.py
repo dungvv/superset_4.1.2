@@ -75,6 +75,7 @@ from superset.dashboards.filters import (
     DashboardTitleOrSlugFilter,
     FilterRelatedRoles,
 )
+from superset.dashboards.report_context import build_template_context
 from superset.dashboards.word_export import (
     DOCX_CONTENT_TYPE,
     build_default_word_document,
@@ -105,18 +106,27 @@ from superset.extensions import event_logger
 from superset.models.dashboard import Dashboard
 from superset.models.embedded_dashboard import EmbeddedDashboard
 from superset.security.guest_token import GuestUser
+from superset.tasks.report_export import (
+    generate_dashboard_report,
+    report_cache_key,
+    set_report_state,
+    STATUS_FAILED,
+    STATUS_PENDING,
+    STATUS_READY,
+)
 from superset.tasks.thumbnails import (
     cache_dashboard_screenshot,
     cache_dashboard_thumbnail,
 )
 from superset.tasks.utils import get_current_user
 from superset.utils import json
+from superset.utils.hashing import md5_sha_from_dict
 from superset.utils.pdf import build_pdf_from_screenshots
 from superset.utils.screenshots import (
     DashboardScreenshot,
     DEFAULT_DASHBOARD_WINDOW_SIZE,
 )
-from superset.utils.urls import get_url_path
+from superset.utils.urls import get_url_path, modify_url_query
 from superset.views.base_api import (
     BaseSupersetModelRestApi,
     RelatedFieldFilter,
@@ -208,6 +218,8 @@ class DashboardRestApi(BaseSupersetModelRestApi):
         "cache_dashboard_screenshot",
         "screenshot",
         "export_word",
+        "export_report",
+        "export_report_result",
     }
     resource_name = "dashboard"
     allow_browser_login = True
@@ -1722,12 +1734,21 @@ class DashboardRestApi(BaseSupersetModelRestApi):
                             description: Chart height (px)
                     dashboard_title:
                       type: string
+                    time_grain:
+                      type: string
+                      description: >-
+                        day/week/month/quarter/year/custom. The server derives
+                        report_type, sum_type, report_date, _from and
+                        _start_date from this.
                     current_start_date:
                       type: string
-                      description: Current period start date for Word template placeholders
+                      description: Period start, ISO (YYYY-MM-DD)
                     current_end_date:
                       type: string
-                      description: Current period end date for Word template placeholders
+                      description: Period end, ISO (YYYY-MM-DD)
+                    kpi_counts:
+                      type: object
+                      description: KPI tallies collected from the rendered charts
           responses:
             200:
               description: Word document binary
@@ -1748,76 +1769,12 @@ class DashboardRestApi(BaseSupersetModelRestApi):
 
             charts = data["charts"]
             dashboard_title = data.get("dashboard_title", "Dashboard Export")
-            kpi_counts = data.get("kpi_counts") or {}
-            template_context = {
-                "start_date": data.get("start_date")
-                or data.get("current_start_date", ""),
-                "end_date": data.get("end_date") or data.get("current_end_date", ""),
-                "current_start_date": data.get("current_start_date", ""),
-                "current_end_date": data.get("current_end_date", ""),
-                "report_type": data.get("report_type", ""),
-                "report_month": data.get("report_month", ""),
-                "kpi_total": data.get(
-                    "kpi_total",
-                    kpi_counts.get("kpi_total", ""),
-                ),
-                "kpi_common_total": data.get(
-                    "kpi_common_total",
-                    kpi_counts.get("kpi_common_total", ""),
-                ),
-                "kpi_common_passed": data.get(
-                    "kpi_common_passed",
-                    kpi_counts.get("kpi_common_passed", ""),
-                ),
-                "kpi_common_failed": data.get(
-                    "kpi_common_failed",
-                    kpi_counts.get("kpi_common_failed", ""),
-                ),
-                "kpi_common_no_data": data.get(
-                    "kpi_common_no_data",
-                    kpi_counts.get("kpi_common_no_data", ""),
-                ),
-                "kpi_common_not_passed": data.get(
-                    "kpi_common_not_passed",
-                    kpi_counts.get("kpi_common_not_passed", ""),
-                ),
-                "kpi_common_passed_rate": data.get(
-                    "kpi_common_passed_rate",
-                    kpi_counts.get("kpi_common_passed_rate", ""),
-                ),
-                "kpi_key_total": data.get(
-                    "kpi_key_total",
-                    kpi_counts.get("kpi_key_total", ""),
-                ),
-                "kpi_key_passed": data.get(
-                    "kpi_key_passed",
-                    kpi_counts.get("kpi_key_passed", ""),
-                ),
-                "kpi_key_failed": data.get(
-                    "kpi_key_failed",
-                    kpi_counts.get("kpi_key_failed", ""),
-                ),
-                "kpi_key_no_data": data.get(
-                    "kpi_key_no_data",
-                    kpi_counts.get("kpi_key_no_data", ""),
-                ),
-                "kpi_key_not_passed": data.get(
-                    "kpi_key_not_passed",
-                    kpi_counts.get("kpi_key_not_passed", ""),
-                ),
-                "kpi_key_passed_rate": data.get(
-                    "kpi_key_passed_rate",
-                    kpi_counts.get("kpi_key_passed_rate", ""),
-                ),
-                "kpi_total_passed": data.get(
-                    "kpi_total_passed",
-                    kpi_counts.get("kpi_total_passed", ""),
-                ),
-                "kpi_total_not_passed": data.get(
-                    "kpi_total_not_passed",
-                    kpi_counts.get("kpi_total_not_passed", ""),
-                ),
-            }
+            template_context = build_template_context(
+                str(data.get("time_grain", "")),
+                str(data.get("current_start_date", "")),
+                str(data.get("current_end_date", "")),
+                data.get("kpi_counts"),
+            )
             try:
                 dashboard = DashboardDAO.get_by_id_or_slug(id_or_slug)
             except DashboardAccessDeniedError:
@@ -1864,3 +1821,198 @@ class DashboardRestApi(BaseSupersetModelRestApi):
             logger.exception("Error generating Word document")
             return self.response_500(message=str(e))
 
+    @expose("/<id_or_slug>/export_report/", methods=("POST",))
+    @protect()
+    @safe
+    @permission_name("read")
+    @statsd_metrics
+    def export_report(self, id_or_slug: str) -> WerkzeugResponse:
+        """Generate a Word/PDF dashboard report server-side.
+
+        Unlike export_word, chart images are rendered headlessly instead of
+        being posted by the browser, so automated clients need no DOM.
+        ---
+        post:
+            summary: Generate a dashboard report (docx or pdf)
+            parameters:
+            - in: path
+            schema:
+                type: string
+            name: id_or_slug
+            requestBody:
+            required: false
+            content:
+                application/json:
+                schema:
+                    type: object
+                    properties:
+                    format:
+                        type: string
+                        enum: [docx, pdf]
+                    time_grain:
+                        type: string
+                        description: day, week, month, quarter, year or custom
+                    current_start_date:
+                        type: string
+                        description: ISO date (YYYY-MM-DD)
+                    current_end_date:
+                        type: string
+                        description: ISO date (YYYY-MM-DD)
+                    url_params:
+                        type: object
+                        description: Extra query params for the rendered dashboard
+                    kpi_counts:
+                        type: object
+                        description: Overrides the KPI counts scraped from the DOM
+            responses:
+            202:
+                description: Report generation accepted
+            400:
+                $ref: '#/components/responses/400'
+            404:
+                $ref: '#/components/responses/404'
+            500:
+                $ref: '#/components/responses/500'
+        """
+        data = request.json or {}
+        export_format = str(data.get("format", "docx")).lower()
+        if export_format not in ("docx", "pdf"):
+            return self.response_400(message="format must be 'docx' or 'pdf'")
+
+        try:
+            dashboard = DashboardDAO.get_by_id_or_slug(id_or_slug)
+        except DashboardAccessDeniedError:
+            return self.response_403()
+        except DashboardNotFoundError:
+            return self.response_404()
+
+        if not thumbnail_cache:
+            return self.response_500(
+                message="No cache configured; report export requires a cache"
+            )
+
+        time_grain = str(data.get("time_grain", ""))
+        start_date = str(data.get("current_start_date", ""))
+        end_date = str(data.get("current_end_date", ""))
+
+        # These params drive the charts themselves: the KPI and time-filter
+        # plugins read the period straight off window.location.search.
+        url_params: dict[str, Any] = {
+            "time_grain": time_grain,
+            "current_start_date": start_date,
+            "current_end_date": end_date,
+        }
+        url_params.update(data.get("url_params") or {})
+        url_params = {k: v for k, v in url_params.items() if v not in (None, "")}
+
+        dashboard_url = modify_url_query(
+            get_url_path(
+                "Superset.dashboard", dashboard_id_or_slug=dashboard.id
+            ),
+            **url_params,
+        )
+
+        template_context = build_template_context(
+            time_grain,
+            start_date,
+            end_date,
+            data.get("kpi_counts"),
+        )
+
+        cache_key = report_cache_key(
+            dashboard.id,
+            md5_sha_from_dict(
+                {
+                    "url": dashboard_url,
+                    "context": template_context,
+                    "format": export_format,
+                }
+            ),
+            export_format,
+        )
+        set_report_state(cache_key, STATUS_PENDING)
+
+        generate_dashboard_report.delay(
+            dashboard_id=dashboard.id,
+            dashboard_url=dashboard_url,
+            cache_key=cache_key,
+            export_format=export_format,
+            template_context=template_context,
+            username=get_current_user(),
+        )
+
+        return self.response(
+            202,
+            cache_key=cache_key,
+            result_url=get_url_path(
+                "DashboardRestApi.export_report_result",
+                id_or_slug=str(dashboard.id),
+                cache_key=cache_key,
+            ),
+        )
+
+    @expose("/<id_or_slug>/export_report/<path:cache_key>/", methods=("GET",))
+    @protect()
+    @safe
+    @permission_name("read")
+    @statsd_metrics
+    def export_report_result(
+        self, id_or_slug: str, cache_key: str
+    ) -> WerkzeugResponse:
+        """Fetch a generated report, or its progress.
+        ---
+        get:
+            summary: Get a generated dashboard report
+            parameters:
+            - in: path
+            schema:
+                type: string
+            name: id_or_slug
+            - in: path
+            schema:
+                type: string
+            name: cache_key
+            responses:
+            200:
+                description: Report binary
+                content:
+                application/pdf:
+                    schema:
+                    type: string
+                    format: binary
+            202:
+                description: Still generating
+            404:
+                $ref: '#/components/responses/404'
+            500:
+                $ref: '#/components/responses/500'
+        """
+        try:
+            DashboardDAO.get_by_id_or_slug(id_or_slug)
+        except DashboardAccessDeniedError:
+            return self.response_403()
+        except DashboardNotFoundError:
+            return self.response_404()
+
+        state = thumbnail_cache.get(cache_key) if thumbnail_cache else None
+        if not state:
+            return self.response_404()
+
+        status = state.get("status")
+        if status == STATUS_FAILED:
+            return self.response_500(
+                message=state.get("error") or "Report generation failed"
+            )
+        if status != STATUS_READY or not state.get("content"):
+            return self.response(202, status=STATUS_PENDING)
+
+        filename = state.get("filename") or "dashboard_export"
+        is_pdf = filename.endswith(".pdf")
+
+        return Response(
+            state["content"],
+            mimetype="application/pdf" if is_pdf else DOCX_CONTENT_TYPE,
+            headers={
+                "Content-Disposition": _build_docx_content_disposition(filename),
+            },
+        )

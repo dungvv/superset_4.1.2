@@ -42,6 +42,7 @@ export interface KpiLineVizProps {
   kpiGroup: 'none' | 'common' | 'key';
   currentRatio: number | null;
   currentAbsolute: string;
+  showCurrentAbsolute: boolean;
   prevRatio: number | null;
   kpiTarget: number | null;
   bigNumberUnit: string;
@@ -52,6 +53,13 @@ export interface KpiLineVizProps {
     isGood?: boolean;
   };
   prevPeriodComparison: {
+    direction: 'up' | 'down' | 'none';
+    value: number;
+    noData: boolean;
+    isGood?: boolean;
+  };
+  monthToDateRatio: number | null;
+  monthToDateComparison: {
     direction: 'up' | 'down' | 'none';
     value: number;
     noData: boolean;
