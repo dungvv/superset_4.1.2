@@ -15,8 +15,8 @@ export interface KpiLineDatum {
 export type KpiLineFormData = QueryFormData & {
   kpi_title?: string;
   detail_url?: string;
-  kpi_group?: 'none' | 'common' | 'key';
-  kpiGroup?: 'none' | 'common' | 'key';
+  kpi_group?: 'none' | 'common' | 'key' | 'main' | 'addon';
+  kpiGroup?: 'none' | 'common' | 'key' | 'main' | 'addon';
   kpi_goal_direction?: 'greater_than' | 'less_than';
   big_number_unit?: string;
   x_axis_title?: string;
@@ -39,7 +39,7 @@ export interface KpiLineVizProps {
   height: number;
   kpiTitle: string;
   detailUrl: string;
-  kpiGroup: 'none' | 'common' | 'key';
+  kpiGroup: 'none' | 'common' | 'key' | 'main' | 'addon';
   currentRatio: number | null;
   currentAbsolute: string;
   showCurrentAbsolute: boolean;

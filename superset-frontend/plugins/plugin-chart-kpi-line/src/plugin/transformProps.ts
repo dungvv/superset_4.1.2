@@ -111,11 +111,9 @@ function getYAxisBounds(seriesList: SeriesDatum[][]): {
 
 function formatXAxisLabel(value: string): string {
   const label = String(value);
-  // SQL emits ISO so labels sort chronologically; display as DD/MM.
-  const iso = label.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (iso) {
-    return `${iso[3]}/${iso[2]}`;
-  }
+  // If the label contains a space, only show the part before the first space
+  const spaceIdx = label.indexOf(' ');
+  if (spaceIdx > 0) return label.slice(0, spaceIdx);
   return label.length > 18 ? `${label.slice(0, 18)}...` : label;
 }
 function getXAxisLabelInterval(totalLabels: number): number {
@@ -163,25 +161,27 @@ export default function transformProps(
 
   const { data = [], colnames = [] } = queriesData[0] || {};
 
-  const isThreeMetric = colnames.length >= 4 && colnames.length < 6;
+  const xIdx = 0;
+  const metricColnames = colnames.filter((_, i) => i !== xIdx);
+
+  const isThreeMetric = metricColnames.length === 3;
 
   const resolvedBigNumberUnit =
     (bigNumberUnit || '').trim() || (isThreeMetric ? '' : '%');
 
-  const xIdx = 0;
-  const kpiIdx = 1;
-  const curIdx = 2;
-  const curTotIdx = isThreeMetric ? -1 : 3;
-  const prevIdx = isThreeMetric ? 3 : 4;
-  const prevTotIdx = isThreeMetric ? -1 : 5;
+  const kpiIdx = 0;
+  const curIdx = 1;
+  const curTotIdx = isThreeMetric ? -1 : 2;
+  const prevIdx = isThreeMetric ? 2 : 3;
+  const prevTotIdx = isThreeMetric ? -1 : 4;
 
   const rows = data as DataRecord[];
 
   const kpiRow = rows.length > 0 ? rows[0] : null;
 
   const extractVal = (row: DataRecord | null, idx: number): number | null => {
-    if (!row || idx < 0 || idx >= colnames.length) return null;
-    return safeNumber(row[colnames[idx]]);
+    if (!row || idx < 0 || idx >= metricColnames.length) return null;
+    return safeNumber(row[metricColnames[idx]]);
   };
 
   const kpiVal = extractVal(kpiRow, kpiIdx);
@@ -258,14 +258,14 @@ export default function transformProps(
         prevSeries.push([x, prev]);
       }
     } else {
-      const succ = safeNumber(row[colnames[curIdx]]) ?? 0;
-      const tot = safeNumber(row[colnames[curTotIdx]]) ?? 0;
+      const succ = safeNumber(row[metricColnames[curIdx]]) ?? 0;
+      const tot = safeNumber(row[metricColnames[curTotIdx]]) ?? 0;
       const ratio = computeRatio(succ, tot);
       if (ratio !== null) {
         currentSeries.push([x, ratio, succ, tot]);
       }
-      const pSucc = safeNumber(row[colnames[prevIdx]]) ?? 0;
-      const pTot = safeNumber(row[colnames[prevTotIdx]]) ?? 0;
+      const pSucc = safeNumber(row[metricColnames[prevIdx]]) ?? 0;
+      const pTot = safeNumber(row[metricColnames[prevTotIdx]]) ?? 0;
       const pRatio = computeRatio(pSucc, pTot);
       if (pRatio !== null) {
         prevSeries.push([x, pRatio, pSucc, pTot]);
@@ -427,9 +427,7 @@ export default function transformProps(
         hideOverlap: true,
         interval: getXAxisLabelIntervalFn(xAxisLabels.length),
         margin: 12,
-        overflow: 'truncate',
         rotate: 0,
-        width: 90,
       },
     },
     yAxis: {
@@ -447,9 +445,13 @@ export default function transformProps(
     },
     tooltip: {
       trigger: 'axis',
+      appendToBody: true,
+      confine: false,
+      extraCssText: 'min-width:180px; white-space:nowrap;',
       formatter: (params: any) => {
         if (!Array.isArray(params)) return '';
-        let html = `${formatXAxisLabel(params[0].name)}<br/>`;
+        // Header is the FULL x-axis label (untruncated, not space-split)
+        let html = `${String(params[0].name)}<br/>`;
         params.forEach((p: any) => {
           const value = p.data[1];
           const val = value !== null ? fmtRatio(Number(value)) : 'N/A';

@@ -39,12 +39,12 @@ REPORT_TYPE_BY_GRAIN = {
 }
 
 SUM_TYPE_BY_GRAIN = {
-    "day": "THÁNG",
-    "month": "THÁNG",
-    "week": "TUẦN",
-    "custom": "TUẦN",
-    "quarter": "QUÝ",
-    "year": "NĂM",
+    "day": "tháng",
+    "month": "tháng",
+    "week": "tuần",
+    "custom": "tuần",
+    "quarter": "quý",
+    "year": "năm",
 }
 
 KPI_COUNT_KEYS = (
@@ -185,7 +185,7 @@ def _self_check() -> None:
 
     day = build_template_context("day", "2026-08-01", "2026-08-31")
     assert day["report_type"] == "NGÀY"
-    assert day["sum_type"] == "THÁNG"
+    assert day["sum_type"] == "tháng"
     assert day["report_date"] == "31/08/2026", day["report_date"]
     assert day["_from"] == ""
     assert day["_start_date"] == ""
@@ -199,7 +199,7 @@ def _self_check() -> None:
 
     custom = build_template_context("custom", "2026-08-01", "2026-08-07")
     assert custom["report_type"] == "TUẦN"
-    assert custom["sum_type"] == "TUẦN"
+    assert custom["sum_type"] == "tuần"
     assert custom["report_date"] == week["report_date"]
 
     month = build_template_context("month", "2026-08-01", "2026-08-31")

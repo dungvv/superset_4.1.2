@@ -1285,6 +1285,15 @@ DASHBOARD_TEMPLATE_ID = None
 WORD_EXPORT_TEMPLATE_DASHBOARDS: list[str | int] = [1]
 WORD_EXPORT_TEMPLATE_PATH = "TMPL_RP.docx"
 
+# Template paths by time_grain: use different templates for daily vs other reports
+# If a time_grain key is not found, falls back to WORD_EXPORT_TEMPLATE_PATH
+WORD_EXPORT_TEMPLATE_BY_TIME_GRAIN: dict[str, str] = {
+    "day": "TMPL_RP_DAY.docx",
+    # "week": "TMPL_RP_WEEK.docx",
+    # "month": "TMPL_RP_MONTH.docx",
+    # Other time_grains (week/month/quarter/year/custom) will use WORD_EXPORT_TEMPLATE_PATH
+}
+
 # Dashboard ids, slugs, or titles that should use EXCEL_EXPORT_TEMPLATE_PATH
 # when downloaded with "Download as Excel".
 EXCEL_EXPORT_TEMPLATE_DASHBOARDS: list[str | int] = WORD_EXPORT_TEMPLATE_DASHBOARDS

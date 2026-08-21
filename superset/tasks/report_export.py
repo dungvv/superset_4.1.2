@@ -112,9 +112,19 @@ def generate_dashboard_report(  # pylint: disable=too-many-locals
             dashboard.dashboard_title,
             current_app.config.get("WORD_EXPORT_TEMPLATE_DASHBOARDS", ()),
         ):
+            time_grain = (template_context or {}).get("time_grain", "")
+            template_by_grain = current_app.config.get(
+                "WORD_EXPORT_TEMPLATE_BY_TIME_GRAIN",
+                {},
+            )
+            default_template = current_app.config.get(
+                "WORD_EXPORT_TEMPLATE_PATH",
+                "TMPL_RP.docx",
+            )
+            template_path = template_by_grain.get(time_grain, default_template)
             output = build_template_word_document(
                 charts,
-                current_app.config.get("WORD_EXPORT_TEMPLATE_PATH", "TMPL_RP.docx"),
+                template_path,
                 context,
             )
         else:

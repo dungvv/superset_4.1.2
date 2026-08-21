@@ -50,6 +50,8 @@ const config: ControlPanelConfig = {
                 ['none', t('Không thuộc nhóm')],
                 ['common', t('KPI chung')],
                 ['key', t('KPI key')],
+                ['main', t('KPI chính')],
+                ['addon', t('KPI add-on')],
               ],
               description: t(
                 'Nhóm dùng để đếm KPI đạt/chưa đạt khi export Word.',

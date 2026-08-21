@@ -17,6 +17,10 @@ export default function buildQuery(formData: QueryFormData) {
       columns: xAxisColumns,
       is_timeseries: false,
       orderby: [],
+      // Strip all filters — this chart renders the full dataset as-is
+      // so the X-axis always reflects every row unfiltered.
+      adhoc_filters: [],
+      extras: {},
     },
   ]);
 }

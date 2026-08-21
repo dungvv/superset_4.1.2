@@ -1786,10 +1786,16 @@ class DashboardRestApi(BaseSupersetModelRestApi):
                 "WORD_EXPORT_TEMPLATE_DASHBOARDS",
                 (),
             )
-            template_path = current_app.config.get(
+            time_grain = str(data.get("time_grain", ""))
+            template_by_grain = current_app.config.get(
+                "WORD_EXPORT_TEMPLATE_BY_TIME_GRAIN",
+                {},
+            )
+            default_template = current_app.config.get(
                 "WORD_EXPORT_TEMPLATE_PATH",
                 "TMPL_RP.docx",
             )
+            template_path = template_by_grain.get(time_grain, default_template)
 
             if is_template_dashboard(
                 dashboard.id,
