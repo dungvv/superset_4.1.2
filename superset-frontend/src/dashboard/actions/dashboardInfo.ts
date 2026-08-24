@@ -28,6 +28,10 @@ import {
 } from 'src/dashboard/types';
 import { onSave } from './dashboardState';
 import { stringifyDashboardMetadataForSave } from '../util/sanitizeDashboardMetadataForSave';
+import {
+  dashboardInfoMatchesUrl,
+  notifyDashboardMetadataSaved,
+} from '../util/dashboardWriteGuard';
 
 export const DASHBOARD_INFO_UPDATED = 'DASHBOARD_INFO_UPDATED';
 
@@ -53,7 +57,22 @@ export const saveChartConfiguration =
       chartConfiguration,
       globalChartConfiguration,
     });
-    const { id, metadata } = getState().dashboardInfo;
+    const { id, metadata, slug } = getState().dashboardInfo;
+    if (!dashboardInfoMatchesUrl({ id, slug })) {
+      dispatch({
+        type: SAVE_CHART_CONFIG_FAIL,
+        chartConfiguration,
+        globalChartConfiguration,
+      });
+      dispatch(
+        addDangerToast(
+          t(
+            'This tab is no longer showing the dashboard you are editing. Refresh the page and try again.',
+          ),
+        ),
+      );
+      return;
+    }
 
     // TODO extract this out when makeApi supports url parameters
     const updateDashboard = makeApi<
@@ -84,6 +103,7 @@ export const saveChartConfiguration =
         chartConfiguration,
         globalChartConfiguration,
       });
+      notifyDashboardMetadataSaved(id);
     } catch (err) {
       dispatch({
         type: SAVE_CHART_CONFIG_FAIL,
@@ -110,7 +130,17 @@ export function setCrossFiltersEnabled(crossFiltersEnabled: boolean) {
 
 export function saveFilterBarOrientation(orientation: FilterBarOrientation) {
   return async (dispatch: Dispatch, getState: () => RootState) => {
-    const { id, metadata } = getState().dashboardInfo;
+    const { id, metadata, slug } = getState().dashboardInfo;
+    if (!dashboardInfoMatchesUrl({ id, slug })) {
+      dispatch(
+        addDangerToast(
+          t(
+            'This tab is no longer showing the dashboard you are editing. Refresh the page and try again.',
+          ),
+        ),
+      );
+      return;
+    }
     const updateDashboard = makeApi<
       Partial<DashboardInfo>,
       { result: Partial<DashboardInfo>; last_modified_time: number }
@@ -136,6 +166,7 @@ export function saveFilterBarOrientation(orientation: FilterBarOrientation) {
       if (lastModifiedTime) {
         dispatch(onSave(lastModifiedTime));
       }
+      notifyDashboardMetadataSaved(id);
     } catch (errorObject) {
       const errorText = await getErrorText(errorObject, 'dashboard');
       dispatch(addDangerToast(errorText));
@@ -146,7 +177,17 @@ export function saveFilterBarOrientation(orientation: FilterBarOrientation) {
 
 export function saveCrossFiltersSetting(crossFiltersEnabled: boolean) {
   return async (dispatch: Dispatch, getState: () => RootState) => {
-    const { id, metadata } = getState().dashboardInfo;
+    const { id, metadata, slug } = getState().dashboardInfo;
+    if (!dashboardInfoMatchesUrl({ id, slug })) {
+      dispatch(
+        addDangerToast(
+          t(
+            'This tab is no longer showing the dashboard you are editing. Refresh the page and try again.',
+          ),
+        ),
+      );
+      return;
+    }
     const updateDashboard = makeApi<
       Partial<DashboardInfo>,
       { result: Partial<DashboardInfo>; last_modified_time: number }
@@ -170,6 +211,7 @@ export function saveCrossFiltersSetting(crossFiltersEnabled: boolean) {
       if (lastModifiedTime) {
         dispatch(onSave(lastModifiedTime));
       }
+      notifyDashboardMetadataSaved(id);
     } catch (errorObject) {
       const errorText = await getErrorText(errorObject, 'dashboard');
       dispatch(addDangerToast(errorText));

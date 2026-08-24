@@ -16,17 +16,22 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { FilterConfiguration, Filters, makeApi } from '@superset-ui/core';
+import { FilterConfiguration, Filters, makeApi, t } from '@superset-ui/core';
 import { Dispatch } from 'redux';
 import { cloneDeep } from 'lodash';
 import {
   SET_DATA_MASK_FOR_FILTER_CONFIG_FAIL,
   setDataMaskForFilterConfigComplete,
 } from 'src/dataMask/actions';
+import { addDangerToast } from 'src/components/MessageToasts/actions';
 import { HYDRATE_DASHBOARD } from './hydrate';
 import { dashboardInfoChanged } from './dashboardInfo';
 import { DashboardInfo } from '../types';
 import { stringifyDashboardMetadataForSave } from '../util/sanitizeDashboardMetadataForSave';
+import {
+  dashboardInfoMatchesUrl,
+  notifyDashboardMetadataSaved,
+} from '../util/dashboardWriteGuard';
 
 export const SET_FILTER_CONFIG_BEGIN = 'SET_FILTER_CONFIG_BEGIN';
 export interface SetFilterConfigBegin {
@@ -57,8 +62,24 @@ export const setFilterConfiguration =
       type: SET_FILTER_CONFIG_BEGIN,
       filterConfig,
     });
-    const { id, metadata } = getState().dashboardInfo;
+    const dashboardInfo = getState().dashboardInfo;
+    const { id, metadata, slug } = dashboardInfo;
     const oldFilters = getState().nativeFilters?.filters;
+
+    if (!dashboardInfoMatchesUrl({ id, slug })) {
+      dispatch(
+        addDangerToast(
+          t(
+            'This tab is no longer showing the dashboard you are editing. Refresh the page and save the filter on the correct dashboard.',
+          ),
+        ),
+      );
+      dispatch({
+        type: SET_FILTER_CONFIG_FAIL,
+        filterConfig,
+      });
+      return;
+    }
 
     // TODO extract this out when makeApi supports url parameters
     const updateDashboard = makeApi<
@@ -96,6 +117,7 @@ export const setFilterConfiguration =
       dispatch(
         setDataMaskForFilterConfigComplete(mergedFilterConfig, oldFilters),
       );
+      notifyDashboardMetadataSaved(id);
     } catch (err) {
       dispatch({
         type: SET_FILTER_CONFIG_FAIL,

@@ -44,6 +44,7 @@ import DashboardContainer from 'src/dashboard/containers/Dashboard';
 
 import { nanoid } from 'nanoid';
 import { RootState } from '../types';
+import { subscribeDashboardMetadataSaved } from '../util/dashboardWriteGuard';
 import {
   chartContextMenuStyles,
   filterCardPopoverStyle,
@@ -121,6 +122,15 @@ export const DashboardPage: FC<PageProps> = ({ idOrSlug }: PageProps) => {
   }, [dispatch, status]);
 
   useEffect(() => {
+    if (!id) {
+      return undefined;
+    }
+    return subscribeDashboardMetadataSaved(id, () => {
+      window.location.reload();
+    });
+  }, [id]);
+
+  useEffect(() => {
     // eslint-disable-next-line consistent-return
     async function getDataMaskApplied() {
       const permalinkKey = getUrlParam(URL_PARAMS.permalinkKey);
@@ -160,8 +170,10 @@ export const DashboardPage: FC<PageProps> = ({ idOrSlug }: PageProps) => {
       return null;
     }
     if (id) getDataMaskApplied();
+    // Re-hydrate when switching dashboards in the same SPA tab so
+    // dashboardInfo.id cannot stay pointed at a previously opened dashboard.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [readyToRender]);
+  }, [readyToRender, id]);
 
   useEffect(() => {
     if (dashboard_title) {
