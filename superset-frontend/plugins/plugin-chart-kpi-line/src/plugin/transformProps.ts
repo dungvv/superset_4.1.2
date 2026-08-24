@@ -130,10 +130,6 @@ function getXAxisLabelIntervalFn(
   return (index: number) => (last - index) % step === 0;
 }
 
-function getLineValueLabelInterval(totalPoints: number): number {
-  return totalPoints > 15 ? 3 : 1;
-}
-
 
 export default function transformProps(
   chartProps: KpiLineChartProps,
@@ -330,9 +326,12 @@ export default function transformProps(
           if (value === null) {
             return '';
           }
-
-          const interval = getLineValueLabelInterval(xAxisLabels.length);
-          return p.dataIndex % interval === 0 ? fmtRatio(Number(value)) : '';
+          // Use same interval as X-axis so labels align with ticks;
+          // always show at the last point.
+          const isLast = p.dataIndex === currentSeries.length - 1;
+          if (isLast) return fmtRatio(Number(value));
+          const show = getXAxisLabelIntervalFn(xAxisLabels.length);
+          return show(p.dataIndex) ? fmtRatio(Number(value)) : '';
         },
       },
       // Interval thinning alone cannot prevent collisions: neighbouring labels

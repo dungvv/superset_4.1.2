@@ -163,7 +163,7 @@ test('a difference invisible at 2dp counts as unchanged', () => {
   expect(almost.kpiComparison.direction).toBe('none');
 });
 
-test('line value labels thin out to every 3rd point past 15 points', () => {
+test('line value labels follow X-axis interval, last point always shown', () => {
   const labelAt = (pointCount: number, dataIndex: number) => {
     const props = build([
       row('summary', 90, 950, 1000),
@@ -179,7 +179,12 @@ test('line value labels thin out to every 3rd point past 15 points', () => {
     });
   };
 
-  expect(labelAt(15, 1)).not.toBe('');
+  // ≤12 points: interval=1, every label shown
+  expect(labelAt(10, 0)).not.toBe('');
+  expect(labelAt(10, 5)).not.toBe('');
+
+  // 16 points: step=3, anchored from last → indices 15, 12, 9, 6, 3 shown
   expect(labelAt(16, 1)).toBe('');
   expect(labelAt(16, 3)).not.toBe('');
+  expect(labelAt(16, 15)).not.toBe(''); // last always shown
 });
