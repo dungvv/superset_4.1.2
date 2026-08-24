@@ -119,6 +119,7 @@ export type DashboardState = {
 };
 export type DashboardInfo = {
   id: number;
+  slug?: string | null;
   common: {
     conf: JsonObject;
   };

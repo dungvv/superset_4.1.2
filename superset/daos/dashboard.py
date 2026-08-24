@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import datetime
 from typing import Any
 
@@ -298,6 +299,7 @@ class DashboardDAO(BaseDAO[Dashboard]):
         dash.css = data.get("css")
 
         metadata = json.loads(data["json_metadata"])
+        cls.remint_native_filter_ids(metadata)
         old_to_new_slice_ids: dict[int, int] = {}
         if data.get("duplicate_slices"):
             # Duplicating slices as well, mapping old ids to new ones
@@ -322,6 +324,43 @@ class DashboardDAO(BaseDAO[Dashboard]):
         cls.set_dash_metadata(dash, metadata, old_to_new_slice_ids)
         db.session.add(dash)
         return dash
+
+    @staticmethod
+    def remint_native_filter_ids(metadata: dict[str, Any]) -> None:
+        """Give copied dashboards unique native-filter ids.
+
+        Copies used to keep the same NATIVE_FILTER-* ids as the source.
+        That makes two open tabs look like they share one filter, and
+        filter-state / dataMask can leak between dashboards.
+        """
+        filters = metadata.get("native_filter_configuration")
+        if not isinstance(filters, list):
+            return
+        id_map: dict[str, str] = {}
+        for fltr in filters:
+            if not isinstance(fltr, dict):
+                continue
+            old_id = fltr.get("id")
+            if not isinstance(old_id, str) or not old_id:
+                continue
+            prefix = (
+                "NATIVE_FILTER_DIVIDER-"
+                if old_id.startswith("NATIVE_FILTER_DIVIDER-")
+                else "NATIVE_FILTER-"
+            )
+            new_id = f"{prefix}{uuid.uuid4()}"
+            id_map[old_id] = new_id
+            fltr["id"] = new_id
+        if not id_map:
+            return
+        for fltr in filters:
+            if not isinstance(fltr, dict):
+                continue
+            parents = fltr.get("cascadeParentIds")
+            if isinstance(parents, list):
+                fltr["cascadeParentIds"] = [
+                    id_map.get(parent, parent) for parent in parents
+                ]
 
     @staticmethod
     def add_favorite(dashboard: Dashboard) -> None:

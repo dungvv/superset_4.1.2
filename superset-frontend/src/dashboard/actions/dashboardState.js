@@ -80,6 +80,10 @@ import {
   sanitizeDashboardMetadataForSave,
   stringifyDashboardMetadataForSave,
 } from '../util/sanitizeDashboardMetadataForSave';
+import {
+  dashboardInfoMatchesUrl,
+  notifyDashboardMetadataSaved,
+} from '../util/dashboardWriteGuard';
 
 function formatSaveDashboardError(error, message) {
   if (typeof message === 'string' && message === 'Forbidden') {
@@ -293,6 +297,17 @@ export const setDashboardMetadata = updatedMetadata => async dispatch => {
 
 export function saveDashboardRequest(data, id, saveType) {
   return (dispatch, getState) => {
+    const { slug: currentSlug } = getState().dashboardInfo || {};
+    if (!dashboardInfoMatchesUrl({ id, slug: currentSlug })) {
+      dispatch(
+        addDangerToast(
+          t(
+            'This tab is no longer showing the dashboard you are editing. Refresh the page and try again.',
+          ),
+        ),
+      );
+      return Promise.reject(new Error('Dashboard tab mismatch'));
+    }
     dispatch({ type: UPDATE_COMPONENTS_PARENTS_LIST });
     dispatch(saveDashboardStarted());
 
@@ -436,6 +451,7 @@ export function saveDashboardRequest(data, id, saveType) {
 
       dispatch(addSuccessToast(t('This dashboard was saved successfully.')));
       dispatch(setOverrideConfirm(undefined));
+      notifyDashboardMetadataSaved(id);
       return response;
     };
 
@@ -748,14 +764,20 @@ export function setDatasetsStatus(status) {
   };
 }
 
-const storeDashboardMetadata = async (id, metadata) =>
-  SupersetClient.put({
+const storeDashboardMetadata = async (id, metadata, slug) => {
+  if (!dashboardInfoMatchesUrl({ id, slug })) {
+    return undefined;
+  }
+  const response = await SupersetClient.put({
     endpoint: `/api/v1/dashboard/${id}`,
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       json_metadata: stringifyDashboardMetadataForSave(metadata),
     }),
   });
+  notifyDashboardMetadataSaved(id);
+  return response;
+};
 
 /**
  *
@@ -766,14 +788,14 @@ const storeDashboardMetadata = async (id, metadata) =>
  */
 export const persistDashboardLabelsColor = () => async (dispatch, getState) => {
   const {
-    dashboardInfo: { id, metadata },
+    dashboardInfo: { id, metadata, slug },
     dashboardState: { labelsColorMapMustSync, sharedLabelsColorsMustSync },
   } = getState();
 
   if (labelsColorMapMustSync || sharedLabelsColorsMustSync) {
     dispatch(setDashboardLabelsColorMapSynced());
     dispatch(setDashboardSharedLabelsColorsSynced());
-    storeDashboardMetadata(id, metadata);
+    storeDashboardMetadata(id, metadata, slug);
   }
 };
 
