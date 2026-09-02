@@ -240,6 +240,26 @@ test('disables overwrite option for non-owner', () => {
   expect(getByRole('radio', { name: 'Save (Overwrite)' })).toBeDisabled();
 });
 
+test('enables overwrite option for admin even if not owner', () => {
+  const { getByRole } = setup(
+    {},
+    mockStore({
+      ...initialState,
+      user: {
+        userId: 2,
+        username: 'admin',
+        firstName: 'Admin',
+        lastName: 'User',
+        isActive: true,
+        isAnonymous: false,
+        permissions: {},
+        roles: { Admin: [['can_write', 'Chart']] },
+      },
+    }),
+  );
+  expect(getByRole('radio', { name: 'Save (Overwrite)' })).toBeEnabled();
+});
+
 test('updates slice name and selected dashboard', async () => {
   const dashboardId = mockEvent.value;
   const saveDataset = jest.fn().mockResolvedValue();

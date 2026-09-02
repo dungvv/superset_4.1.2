@@ -6,12 +6,10 @@ This module provides authentication via external API integration
 import os
 import requests
 import logging
-from typing import Optional, Any
-from flask import redirect, request, session, url_for
-from flask_appbuilder.security.manager import AUTH_OAUTH, AUTH_DB
+from typing import Optional
+
+from flask import current_app, g, has_request_context, session
 from flask_appbuilder.security.sqla.models import User
-from flask_appbuilder import expose
-from werkzeug.security import generate_password_hash
 
 # Import SupersetSecurityManager from Superset
 try:
@@ -25,14 +23,22 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 BASE_URL = "http://10.120.54.43:8088"
-CLIENT_ID = "REPORT_FETEK"
-CLIENT_SECRET = "CLIENT_S9KbBITFtRyW44m"
+CLIENT_ID = os.getenv("EXT_CLIENT_ID")
+CLIENT_SECRET = os.getenv("EXT_CLIENT_SECRET")
+USERNAME = os.getenv("EXT_USERNAME")
+PASSWORD = os.getenv("EXT_PASSWORD")
 
-USERNAME = "REPORT_FETEK"
-PASSWORD = "REPORT_nC9FKmUqNVyPqCe"
+# Map groupRoleCode from partner API → exact Superset role name (ab_role.name).
+ROLE_MAPPING = {
+    "ADM": "Admin",
+    "ADMIN": "Admin",
+    "GRP_ALPHA": "Alpha",
+    "ALPHA": "Alpha",
+    "GAMMA": "Gamma",
+    "PUBLIC": "Public",
+}
 
-LOGIN_ID = "sft_cc_timeout"
-LOGIN_PASSWORD = "Com@2025"
+ALWAYS_INCLUDE_ROLES = ["sql_lab", "Jinja Template"]
 
 
 class ExternalAPIAuthManager(SupersetSecurityManager):
@@ -49,11 +55,7 @@ class ExternalAPIAuthManager(SupersetSecurityManager):
         auth = (CLIENT_ID, CLIENT_SECRET)
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
         data = {"username": USERNAME, "password": PASSWORD, "grant_type": "password"}
-        print(" URL " + url)
-        print(data)
-        print(auth)
-
-        print("🔹 Requesting access token...")
+        logger.debug("🔹 Requesting access token...")
         response = requests.post(url, headers=headers, data=data, auth=auth)
 
         if response.status_code != 200:
@@ -61,13 +63,15 @@ class ExternalAPIAuthManager(SupersetSecurityManager):
 
         token_info = response.json()
         access_token = token_info.get("access_token")
-        print("✅ Access token retrieved successfully.")
-        print(access_token)
+        logger.debug("✅ Access token retrieved successfully.")
         return access_token
 
-    def login_user(self, access_token, username, password):
+    def partner_login(self, access_token, username, password):
         """
         Gửi yêu cầu đến /api/v1.0/partner/login với Bearer token.
+
+        Đặt tên `partner_login` (không phải login_user) để không đè
+        Flask-Login / FAB `login_user` — hàm đó dùng để gắn session đăng nhập.
         """
         url = f"{BASE_URL}/api/v1.0/partner/login"
 
@@ -77,7 +81,7 @@ class ExternalAPIAuthManager(SupersetSecurityManager):
         }
         payload = {"loginId": username, "password": password}
 
-        print("🔹 Logging in with access token...")
+        logger.debug("🔹 Logging in with access token...")
         response = requests.post(url, headers=headers, json=payload)
 
         if response.status_code != 200:
@@ -87,7 +91,7 @@ class ExternalAPIAuthManager(SupersetSecurityManager):
         if result.get("responseCode") != "00000":
             raise Exception(f"Login failed: {result}")
 
-        print("✅ Login successful.")
+        logger.debug("✅ Login successful.")
         return result
 
     def __init__(self, appbuilder):
@@ -140,7 +144,7 @@ class ExternalAPIAuthManager(SupersetSecurityManager):
             return user
 
         # Fallback to database authentication
-        print("Now try login with database authentication")
+        logger.debug("Now try login with database authentication")
         return super().auth_user_db(username, password)
 
     def _verify_external_api(
@@ -169,60 +173,127 @@ class ExternalAPIAuthManager(SupersetSecurityManager):
         """
         token = self.get_token()
         try:
-            login_result = self.login_user(token, username, password)
-        except:
-            print("Login failed")
+            login_result = self.partner_login(token, username, password)
+        except Exception as e:
+            logger.error(f"Login failed: {e}")
             return False
         if login_result.get("responseCode") != "00000":
             return False
+        role_code = (
+            login_result.get("groupRoleCode")
+            or login_result.get("groupRoleCode")
+            or login_result.get("roleCode")
+        )
         user_info = {
             "username": username,
             "email": f"{username}@unitel-report.com",
             "first_name": username,
             "last_name": username,
-            "roles": [login_result.get("groupRoleCode")],
+            "roles": [role_code] if role_code else [],
         }
         session["external_api_user"] = user_info
+        logger.info(
+            "External API login ok for %s, groupRoleCode=%r", username, role_code
+        )
         return True
+
+    def _session_external_user(self) -> dict:
+        if not has_request_context():
+            return {}
+        try:
+            return session.get("external_api_user") or {}
+        except RuntimeError:
+            return {}
+
+    def _find_role_ci(self, name: Optional[str]):
+        """find_role, case-insensitive, strip whitespace, then ROLE_MAPPING."""
+        if not name or not str(name).strip():
+            return None
+        raw = str(name).strip()
+        mapped = (
+            ROLE_MAPPING.get(raw)
+            or ROLE_MAPPING.get(raw.upper())
+            or ROLE_MAPPING.get(raw.lower())
+            or raw
+        )
+        role = self.find_role(mapped)
+        if role:
+            return role
+        target = mapped.lower()
+        try:
+            for candidate in self.get_all_roles():
+                if candidate.name.lower() == target:
+                    return candidate
+        except Exception:
+            logger.debug("get_all_roles() unavailable for case-insensitive lookup")
+        logger.warning("Could not map external role %r to a Superset role", name)
+        return None
+
+    def _merge_roles(self, *role_lists) -> list:
+        merged = {}
+        for roles in role_lists:
+            for role in roles or []:
+                if role is not None:
+                    merged[role.id] = role
+        return list(merged.values())
+
+    def _db_roles(self, user: Optional[User]) -> list:
+        if not user:
+            try:
+                user = g.user
+            except Exception:
+                user = None
+        if not user or getattr(user, "is_anonymous", True):
+            return []
+        try:
+            return list(super().get_user_roles(user) or [])
+        except Exception:
+            return list(getattr(user, "roles", None) or [])
 
     def get_user_roles(self, user: Optional[User] = None) -> list:
         """
-        Get user roles from external API if available
+        Union of:
+          1. roles in ab_user_role (UI / DB)
+          2. mapped groupRoleCode from the login session
+          3. ALWAYS_INCLUDE_ROLES
+
+        Previously this method *replaced* DB roles whenever the session had
+        external_api_user. Mapping miss + ALWAYS_INCLUDE_ROLES meant the user
+        kept sql_lab but lost Admin → 403 on dataset PUT.
         """
-        external_user = session.get("external_api_user", {})
+        if not user:
+            try:
+                user = g.user
+            except Exception:
+                user = None
+
+        if user is not None and getattr(user, "is_anonymous", False):
+            public_role = current_app.config.get("AUTH_ROLE_PUBLIC")
+            return [self.get_public_role()] if public_role else []
+
+        db_roles = self._db_roles(user)
+
+        external_user = self._session_external_user()
+        mapped_roles = []
         if external_user:
-            roles = external_user.get("roles", [])
-            # Map external roles to Superset roles
-            superset_roles = []
-            for role_name in roles:
-                role = self.find_role(role_name)
-                if role:
-                    superset_roles.append(role)
-            return superset_roles if superset_roles else [self.find_role("Public")]
-        if user:
-            if user.is_anonymous:
-                public_role = get_conf().get("AUTH_ROLE_PUBLIC")
-                return [self.get_public_role()] if public_role else []
-            else:
-                return super().get_user_roles(user)
-        return [self.find_role("Public")]
+            raw_roles = [r for r in (external_user.get("roles") or []) if r]
+            mapped_roles = [self._find_role_ci(r) for r in raw_roles]
+            extras = [self._find_role_ci(r) for r in ALWAYS_INCLUDE_ROLES]
+            mapped_roles = self._merge_roles(mapped_roles, extras)
 
-    @expose("/login/", methods=["GET", "POST"])
-    def login(self):
-        """
-        Custom login view that supports external API authentication
-        """
-        if request.method == "POST":
-            username = request.form.get("username")
-            password = request.form.get("password")
+        final = self._merge_roles(db_roles, mapped_roles)
+        if not final:
+            public = self.find_role("Public")
+            return [public] if public else []
 
-            if username and password:
-                user = self.auth_user_db(username, password)
-                if user:
-                    self.appbuilder.sm.login_user(user)
-                    return redirect(self.appbuilder.get_url_for_index)
-
-        return super().login()
+        logger.debug(
+            "get_user_roles user=%s db=%s session_raw=%s final=%s",
+            getattr(user, "username", None),
+            [r.name for r in db_roles],
+            (external_user or {}).get("roles"),
+            [r.name for r in final],
+        )
+        return final
 
     """
     Alternative implementation for token-based authentication

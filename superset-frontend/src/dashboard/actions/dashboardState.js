@@ -585,29 +585,25 @@ export function fetchCharts(
   dashboardId,
 ) {
   return (dispatch, getState) => {
-    if (!interval) {
-      chartList.forEach(chartKey =>
-        dispatch(refreshChart(chartKey, force, dashboardId)),
-      );
+    const fire = chartKey =>
+      dispatch(refreshChart(chartKey, force, dashboardId));
+    if (!interval || chartList.length <= 1) {
+      chartList.forEach(fire);
       return;
     }
 
     const { metadata: meta } = getState().dashboardInfo;
-    const refreshTime = Math.max(interval, meta.stagger_time || 5000); // default 5 seconds
-    if (typeof meta.stagger_refresh !== 'boolean') {
-      meta.stagger_refresh =
-        meta.stagger_refresh === undefined
-          ? true
-          : meta.stagger_refresh === 'true';
+    const staggerRefresh =
+      meta.stagger_refresh === undefined
+        ? true
+        : meta.stagger_refresh === true || meta.stagger_refresh === 'true';
+    if (!staggerRefresh) {
+      chartList.forEach(fire);
+      return;
     }
-    const delay = meta.stagger_refresh
-      ? refreshTime / (chartList.length - 1)
-      : 0;
+    const gap = Math.max(80, Math.min(Number(interval) || 250, 400));
     chartList.forEach((chartKey, i) => {
-      setTimeout(
-        () => dispatch(refreshChart(chartKey, force, dashboardId)),
-        delay * i,
-      );
+      setTimeout(() => fire(chartKey), gap * i);
     });
   };
 }

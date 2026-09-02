@@ -70,6 +70,42 @@ export function userHasPermission(
   );
 }
 
+export function canUserOverwriteChart(
+  slice?: {
+    owners?: unknown;
+    is_managed_externally?: boolean;
+    is_managed_externally?: boolean;
+  } | null,
+  user?: UserWithPermissionsAndRoles | UndefinedUser | null,
+): boolean {
+  if (!slice || slice.is_managed_externally || slice.is_managed_externally) {
+    return false;
+  }
+  if (isUserAdmin(user ?? undefined)) {
+    return true;
+  }
+  if (!isUserWithPermissionsAndRoles(user) || user.userId == null) {
+    return false;
+  }
+  const userId = Number(user.userId);
+  if (Number.isNaN(userId)) {
+    return false;
+  }
+  const owners = Array.isArray(slice.owners) ? slice.owners : [];
+  return owners.some(owner => {
+    if (owner == null) {
+      return false;
+    }
+    if (typeof owner === 'object') {
+      const id =
+        (owner as { id?: number; value?: number }).id ??
+        (owner as { value?: number }).value;
+      return Number(id) === userId;
+    }
+    return Number(owner) === userId;
+  });
+}
+
 export const canUserSaveAsDashboard = (
   dashboard: Dashboard,
   user?: UserWithPermissionsAndRoles | UndefinedUser | null,

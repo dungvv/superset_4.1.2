@@ -54,6 +54,7 @@ import {
 import setPeriodicRunner, {
   stopPeriodicRender,
 } from 'src/dashboard/util/setPeriodicRunner';
+import isDashboardLoading from 'src/dashboard/util/isDashboardLoading';
 import { PageHeaderWithActions } from 'src/components/PageHeaderWithActions';
 import MetadataBar, { MetadataType } from 'src/components/MetadataBar';
 import DashboardEmbedModal from '../EmbeddedModal';
@@ -194,6 +195,9 @@ class Header extends PureComponent {
     this.toggleEditMode = this.toggleEditMode.bind(this);
     this.forceRefresh = this.forceRefresh.bind(this);
     this.startPeriodicRender = this.startPeriodicRender.bind(this);
+    this.handleVisibilityChange = this.handleVisibilityChange.bind(this);
+    this.runPeriodicRender = this.runPeriodicRender.bind(this);
+    this.refreshIntervalMs = 0;
     this.overwriteDashboard = this.overwriteDashboard.bind(this);
     this.showPropertiesModal = this.showPropertiesModal.bind(this);
     this.hidePropertiesModal = this.hidePropertiesModal.bind(this);
@@ -202,6 +206,7 @@ class Header extends PureComponent {
 
   componentDidMount() {
     const { refreshFrequency } = this.props;
+    document.addEventListener('visibilitychange', this.handleVisibilityChange);
     this.startPeriodicRender(refreshFrequency * 1000);
   }
 
@@ -229,10 +234,64 @@ class Header extends PureComponent {
   }
 
   componentWillUnmount() {
+    document.removeEventListener(
+      'visibilitychange',
+      this.handleVisibilityChange,
+    );
     stopPeriodicRender(this.refreshTimer);
-    this.props.setRefreshFrequency(0);
+    // Do not reset refreshFrequency here — a Header remount (strict mode /
+    // SPA re-render) would restart the timer at 0 and auto-refresh dies.
     clearTimeout(this.ctrlYTimeout);
     clearTimeout(this.ctrlZTimeout);
+  }
+
+  handleVisibilityChange() {
+    if (document.hidden) {
+      stopPeriodicRender(this.refreshTimer);
+      this.refreshTimer = 0;
+      return;
+    }
+    if (this.refreshIntervalMs > 0) {
+      this.startPeriodicRender(this.refreshIntervalMs);
+    }
+  }
+
+  runPeriodicRender(interval, intervalMessage) {
+    if (isDashboardLoading(this.props.charts)) {
+      return;
+    }
+
+    const { fetchCharts, logEvent, charts, dashboardInfo } = this.props;
+    const { metadata } = dashboardInfo;
+    const immune = metadata?.timed_refresh_immune_slices || [];
+    const affectedCharts = Object.values(charts)
+      .filter(chart => immune.indexOf(chart.id) === -1)
+      .map(chart => chart.id);
+
+    if (affectedCharts.length === 0) {
+      return;
+    }
+
+    logEvent(LOG_ACTIONS_PERIODIC_RENDER_DASHBOARD, {
+      interval,
+      chartCount: affectedCharts.length,
+    });
+    if (intervalMessage) {
+      this.props.addWarningToast(
+        t(
+          `This dashboard is currently auto refreshing; the next auto refresh will be in %s.`,
+          intervalMessage,
+        ),
+      );
+    }
+    const force =
+      dashboardInfo.common?.conf?.DASHBOARD_AUTO_REFRESH_MODE !== 'fetch';
+    fetchCharts(
+      affectedCharts,
+      force,
+      interval > 0 ? Math.min(250, interval * 0.2) : 0,
+      dashboardInfo.id,
+    );
   }
 
   handleChangeText(nextText) {
@@ -287,16 +346,19 @@ class Header extends PureComponent {
     return false;
   }
 
-  startPeriodicRender(interval) {
-    let intervalMessage;
+  startPeriodicRender(interval, { runImmediately = false } = {}) {
+    this.refreshIntervalMs = interval;
+    let intervalMessage = '';
 
-    if (interval) {
+    if (interval > 0) {
       const { dashboardInfo } = this.props;
       const periodicRefreshOptions =
         dashboardInfo.common?.conf?.DASHBOARD_AUTO_REFRESH_INTERVALS;
-      const predefinedValue = periodicRefreshOptions.find(
-        option => Number(option[0]) === interval / 1000,
-      );
+      const predefinedValue = Array.isArray(periodicRefreshOptions)
+        ? periodicRefreshOptions.find(
+            option => Number(option[0]) === interval / 1000,
+          )
+        : undefined;
 
       if (predefinedValue) {
         intervalMessage = t(predefinedValue[1]);
@@ -306,45 +368,25 @@ class Header extends PureComponent {
     }
 
     const periodicRender = () => {
-      const { fetchCharts, logEvent, charts, dashboardInfo } = this.props;
-      const { metadata } = dashboardInfo;
-      const immune = metadata.timed_refresh_immune_slices || [];
-      const affectedCharts = Object.values(charts)
-        .filter(chart => immune.indexOf(chart.id) === -1)
-        .map(chart => chart.id);
-
-      logEvent(LOG_ACTIONS_PERIODIC_RENDER_DASHBOARD, {
-        interval,
-        chartCount: affectedCharts.length,
-      });
-      this.props.addWarningToast(
-        t(
-          `This dashboard is currently auto refreshing; the next auto refresh will be in %s.`,
-          intervalMessage,
-        ),
-      );
-      if (dashboardInfo.common.conf.DASHBOARD_AUTO_REFRESH_MODE === 'fetch') {
-        // force-refresh while auto-refresh in dashboard
-        return fetchCharts(
-          affectedCharts,
-          false,
-          interval * 0.2,
-          dashboardInfo.id,
-        );
-      }
-      return fetchCharts(
-        affectedCharts,
-        true,
-        interval * 0.2,
-        dashboardInfo.id,
-      );
+      this.runPeriodicRender(interval, intervalMessage);
     };
 
-    this.refreshTimer = setPeriodicRunner({
-      interval,
-      periodicRender,
-      refreshTimer: this.refreshTimer,
-    });
+    stopPeriodicRender(this.refreshTimer);
+    if (interval > 0) {
+      this.refreshTimer = setPeriodicRunner({
+        interval,
+        periodicRender,
+        refreshTimer: this.refreshTimer,
+        onTimerScheduled: timerId => {
+          this.refreshTimer = timerId;
+        },
+      });
+    } else {
+      this.refreshTimer = 0;
+    }
+    if (interval > 0 && runImmediately) {
+      this.runPeriodicRender(interval, intervalMessage);
+    }
   }
 
   toggleEditMode() {
@@ -368,10 +410,10 @@ class Header extends PureComponent {
       slug,
     } = this.props;
 
-    // check refresh frequency is for current session or persist
-    const refreshFrequency = shouldPersistRefreshFrequency
-      ? currentRefreshFrequency
-      : dashboardInfo.metadata?.refresh_frequency;
+    // Always persist the interval currently in use. View-mode changes used
+    // to stay session-only, so a Save / reload dropped auto-refresh to 0.
+    const refreshFrequency =
+      currentRefreshFrequency ?? dashboardInfo.metadata?.refresh_frequency ?? 0;
 
     const currentColorNamespace =
       dashboardInfo?.metadata?.color_namespace || colorNamespace;

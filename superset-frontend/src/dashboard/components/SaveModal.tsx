@@ -125,10 +125,8 @@ class SaveModal extends PureComponent<SaveModalProps, SaveModalState> {
       lastModifiedTime,
     } = this.props;
 
-    // check refresh frequency is for current session or persist
-    const refreshFrequency = shouldPersistRefreshFrequency
-      ? currentRefreshFrequency
-      : dashboardInfo.metadata?.refresh_frequency; // eslint-disable camelcase
+    const refreshFrequency =
+      currentRefreshFrequency ?? dashboardInfo.metadata?.refresh_frequency ?? 0;
 
     const data = {
       certified_by: dashboardInfo.certified_by,

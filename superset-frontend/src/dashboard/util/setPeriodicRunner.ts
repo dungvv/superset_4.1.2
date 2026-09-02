@@ -18,25 +18,38 @@
  */
 export const stopPeriodicRender = (refreshTimer?: number) => {
   if (refreshTimer) {
-    clearInterval(refreshTimer);
+    clearTimeout(refreshTimer);
   }
 };
 
 interface SetPeriodicRunnerProps {
   interval?: number;
-  periodicRender: TimerHandler;
+  periodicRender: () => void;
   refreshTimer?: number;
+  onTimerScheduled?: (timerId: number) => void;
 }
 
+// Drift-corrected chained setTimeout (clearTimeout-friendly via onTimerScheduled).
 export default function setPeriodicRunner({
   interval = 0,
   periodicRender,
   refreshTimer,
-}: SetPeriodicRunnerProps) {
+  onTimerScheduled,
+}: SetPeriodicRunnerProps): number {
   stopPeriodicRender(refreshTimer);
 
   if (interval > 0) {
-    return setInterval(periodicRender, interval);
+    let nextTickAt = Date.now() + interval;
+    const scheduleNext = () => {
+      periodicRender();
+      nextTickAt += interval;
+      const delay = Math.max(0, nextTickAt - Date.now());
+      const timerId = window.setTimeout(scheduleNext, delay);
+      onTimerScheduled?.(timerId);
+    };
+    const initialTimerId = window.setTimeout(scheduleNext, interval);
+    onTimerScheduled?.(initialTimerId);
+    return initialTimerId;
   }
   return 0;
 }

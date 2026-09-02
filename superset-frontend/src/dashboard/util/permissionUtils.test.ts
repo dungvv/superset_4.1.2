@@ -27,6 +27,7 @@ import {
   userHasPermission,
   canUserEditDashboard,
   canUserSaveAsDashboard,
+  canUserOverwriteChart,
   isUserAdmin,
 } from './permissionUtils';
 
@@ -126,6 +127,38 @@ describe('canUserEditDashboard', () => {
         ...adminUser,
         roles: { Admin: [] },
       }),
+    ).toEqual(false);
+  });
+});
+
+describe('canUserOverwriteChart', () => {
+  const slice = { owners: [1], is_managed_externally: false };
+
+  it('allows owners even when userId type does not match', () => {
+    expect(
+      canUserOverwriteChart(slice, { ...ownerUser, userId: '1' as any }),
+    ).toEqual(true);
+  });
+  it('allows owners listed as objects', () => {
+    expect(
+      canUserOverwriteChart(
+        { owners: [{ id: 1 }], is_managed_externally: false },
+        ownerUser,
+      ),
+    ).toEqual(true);
+  });
+  it('allows admin users who are not owners', () => {
+    expect(canUserOverwriteChart(slice, adminUser)).toEqual(true);
+  });
+  it('rejects non-owners', () => {
+    expect(canUserOverwriteChart(slice, outsiderUser)).toEqual(false);
+  });
+  it('rejects externally managed charts', () => {
+    expect(
+      canUserOverwriteChart(
+        { ...slice, is_managed_externally: true },
+        adminUser,
+      ),
     ).toEqual(false);
   });
 });

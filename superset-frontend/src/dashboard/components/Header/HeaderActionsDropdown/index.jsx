@@ -121,8 +121,13 @@ export class HeaderActionsDropdown extends PureComponent {
   }
 
   changeRefreshInterval(refreshInterval, isPersistent) {
-    this.props.setRefreshFrequency(refreshInterval, isPersistent);
-    this.props.startPeriodicRender(refreshInterval * 1000);
+    this.props.setRefreshFrequency(
+      refreshInterval,
+      isPersistent || this.props.userCanEdit,
+    );
+    this.props.startPeriodicRender(refreshInterval * 1000, {
+      runImmediately: refreshInterval > 0,
+    });
   }
 
   handleMenuClick({ key }) {
