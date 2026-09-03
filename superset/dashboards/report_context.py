@@ -63,6 +63,15 @@ KPI_COUNT_KEYS = (
     "kpi_key_passed_rate",
     "kpi_total_passed",
     "kpi_total_not_passed",
+    "kpi_ipcc_main_total",
+    "kpi_ipcc_main_passed",
+    "kpi_ipcc_main_not_passed",
+    "kpi_ipcc_ao_total",
+    "kpi_ipcc_ao_passed",
+    "kpi_ipcc_ao_not_passed",
+    "kpi_ipcc_total",
+    "kpi_ipcc_total_passed",
+    "kpi_ipcc_total_not_passed",
 )
 
 
@@ -87,10 +96,12 @@ def calculate_passed_rate(passed: int, total: int) -> str:
 
 
 def build_report_date(time_grain: str, start_date: str, end_date: str) -> str:
-    """week/custom -> ``start - end``, month -> ``MM/YYYY``, else the end date."""
-    if time_grain in WEEK_LIKE_GRAINS:
+    """week/custom -> ``start - end``, sum_type "tháng" -> ``MM/YYYY``, else ``DD/MM/YYYY``."""
+    grain = (time_grain or "").strip().lower()
+    sum_type = SUM_TYPE_BY_GRAIN.get(grain, "")
+    if grain in WEEK_LIKE_GRAINS:
         return f"{format_date_dmy(start_date)} - {format_date_dmy(end_date)}"
-    if time_grain == "month":
+    if sum_type == "tháng":
         return format_report_month(start_date)
     return format_date_dmy(end_date)
 
@@ -100,35 +111,67 @@ def build_kpi_export_counts(
 ) -> dict[str, Any]:
     """Aggregate per-chart KPI statuses into the template count placeholders.
 
-    Each entry is ``{"group": "none"|"common"|"key", "status": "passed"|"failed"
-    |"no_data"}``, matching the ``data-kpi-*`` attributes read from the DOM.
+    Each entry is ``{"group": "none"|"common"|"key"|"main"|"addon",
+    "status": "passed"|"failed"|"no_data"}``, matching the ``data-kpi-*``
+    attributes read from the DOM.
     """
     counts: dict[str, Any] = {key: 0 for key in KPI_COUNT_KEYS}
     counts["kpi_common_passed_rate"] = "0"
     counts["kpi_key_passed_rate"] = "0"
 
+    _GROUP_PREFIX = {
+        "common": "kpi_common",
+        "key": "kpi_key",
+        "main": "kpi_ipcc_main",
+        "addon": "kpi_ipcc_ao",
+    }
+    _IPCC_GROUPS = {"main", "addon"}
+
     for chart in kpi_charts or []:
         group = chart.get("group")
-        if group not in ("common", "key"):
+        if group == "none" or group is None:
+            continue
+
+        prefix = _GROUP_PREFIX.get(group)
+        if prefix is None:
             continue
 
         status = chart.get("status")
         if status not in ("passed", "failed", "no_data"):
             status = "no_data"
 
-        counts[f"kpi_{group}_total"] += 1
-        counts[f"kpi_{group}_{status}"] += 1
+        counts[f"{prefix}_total"] += 1
+        if group in _IPCC_GROUPS:
+            if status == "passed":
+                counts[f"{prefix}_passed"] += 1
+        else:
+            counts[f"{prefix}_{status}"] += 1
 
     counts["kpi_common_not_passed"] = (
         counts["kpi_common_total"] - counts["kpi_common_passed"]
     )
     counts["kpi_key_not_passed"] = counts["kpi_key_total"] - counts["kpi_key_passed"]
+    counts["kpi_ipcc_main_not_passed"] = (
+        counts["kpi_ipcc_main_total"] - counts["kpi_ipcc_main_passed"]
+    )
+    counts["kpi_ipcc_ao_not_passed"] = (
+        counts["kpi_ipcc_ao_total"] - counts["kpi_ipcc_ao_passed"]
+    )
     counts["kpi_total"] = counts["kpi_common_total"] + counts["kpi_key_total"]
     counts["kpi_total_passed"] = (
         counts["kpi_common_passed"] + counts["kpi_key_passed"]
     )
     counts["kpi_total_not_passed"] = (
         counts["kpi_common_not_passed"] + counts["kpi_key_not_passed"]
+    )
+    counts["kpi_ipcc_total_passed"] = (
+        counts["kpi_ipcc_main_passed"] + counts["kpi_ipcc_ao_passed"]
+    )
+    counts["kpi_ipcc_total_not_passed"] = (
+        counts["kpi_ipcc_main_not_passed"] + counts["kpi_ipcc_ao_not_passed"]
+    )
+    counts["kpi_ipcc_total"] = (
+        counts["kpi_ipcc_total_passed"] + counts["kpi_ipcc_total_not_passed"]
     )
     counts["kpi_common_passed_rate"] = calculate_passed_rate(
         counts["kpi_common_passed"], counts["kpi_common_total"]
@@ -151,7 +194,9 @@ def build_template_context(
     ``start_date``/``end_date`` are ISO (``YYYY-MM-DD``); output dates are
     ``DD/MM/YYYY`` to match what the frontend sends.
     """
-    is_week_like = time_grain in WEEK_LIKE_GRAINS
+    grain = (time_grain or "").strip().lower()
+    is_week_like = grain in WEEK_LIKE_GRAINS
+    sum_type = (SUM_TYPE_BY_GRAIN.get(grain, "") or "").lower()
     formatted_start = format_date_dmy(start_date)
     formatted_end = format_date_dmy(end_date)
 
@@ -160,9 +205,9 @@ def build_template_context(
         "end_date": formatted_end,
         "current_start_date": formatted_start,
         "current_end_date": formatted_end,
-        "report_type": REPORT_TYPE_BY_GRAIN.get(time_grain, ""),
-        "sum_type": SUM_TYPE_BY_GRAIN.get(time_grain, ""),
-        "report_date": build_report_date(time_grain, start_date, end_date),
+        "report_type": REPORT_TYPE_BY_GRAIN.get(grain, ""),
+        "sum_type": sum_type,
+        "report_date": build_report_date(grain, start_date, end_date),
         "_from": "TỪ " if is_week_like else "",
         "_start_date": f"{formatted_start} " if is_week_like else "",
         "report_month": format_report_month(start_date),
@@ -186,7 +231,8 @@ def _self_check() -> None:
     day = build_template_context("day", "2026-08-01", "2026-08-31")
     assert day["report_type"] == "NGÀY"
     assert day["sum_type"] == "tháng"
-    assert day["report_date"] == "31/08/2026", day["report_date"]
+    # day grain still resolves to "tháng" sum_type -> MM/YYYY, not the end date
+    assert day["report_date"] == "08/2026", day["report_date"]
     assert day["_from"] == ""
     assert day["_start_date"] == ""
     assert day["report_month"] == "08/2026"
@@ -205,6 +251,12 @@ def _self_check() -> None:
     month = build_template_context("month", "2026-08-01", "2026-08-31")
     assert month["report_date"] == "08/2026", month["report_date"]
     assert month["report_type"] == "THÁNG"
+    assert month["sum_type"] == "tháng"
+
+    normalized = build_template_context(" Month ", "2026-08-01", "2026-08-31")
+    assert normalized["report_type"] == "THÁNG"
+    assert normalized["sum_type"] == "tháng"
+    assert normalized["report_date"] == "08/2026"
 
     quarter = build_template_context("quarter", "2026-07-01", "2026-09-30")
     assert quarter["report_type"] == "QUÝ"
@@ -225,6 +277,9 @@ def _self_check() -> None:
             {"group": "key", "status": "passed"},
             {"group": "none", "status": "passed"},
             {"group": "key", "status": "bogus"},
+            {"group": "main", "status": "passed"},
+            {"group": "main", "status": "failed"},
+            {"group": "addon", "status": "passed"},
         ]
     )
     assert counts["kpi_common_total"] == 3
@@ -233,11 +288,20 @@ def _self_check() -> None:
     assert counts["kpi_common_passed_rate"] == "33.33", counts["kpi_common_passed_rate"]
     assert counts["kpi_key_total"] == 3
     assert counts["kpi_key_passed"] == 2
-    assert counts["kpi_key_no_data"] == 1  # unknown status counted as no_data
+    assert counts["kpi_key_no_data"] == 1
     assert counts["kpi_key_passed_rate"] == "66.67"
     assert counts["kpi_total"] == 6
     assert counts["kpi_total_passed"] == 3
     assert counts["kpi_total_not_passed"] == 3
+    assert counts["kpi_ipcc_main_total"] == 2
+    assert counts["kpi_ipcc_main_passed"] == 1
+    assert counts["kpi_ipcc_main_not_passed"] == 1
+    assert counts["kpi_ipcc_ao_total"] == 1
+    assert counts["kpi_ipcc_ao_passed"] == 1
+    assert counts["kpi_ipcc_ao_not_passed"] == 0
+    assert counts["kpi_ipcc_total"] == 3
+    assert counts["kpi_ipcc_total_passed"] == 2
+    assert counts["kpi_ipcc_total_not_passed"] == 1
 
     # caller-supplied counts win over the zeroed defaults
     overridden = build_template_context(

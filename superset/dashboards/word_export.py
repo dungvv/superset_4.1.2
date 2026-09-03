@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import base64
 import io
+import logging
 import re
 from copy import deepcopy
 from pathlib import Path
@@ -31,6 +32,8 @@ from docx.table import Table
 from docx.oxml.ns import qn
 from docx.text.paragraph import Paragraph
 from docx.text.run import Run
+
+logger = logging.getLogger(__name__)
 
 PLACEHOLDER_PATTERN = re.compile(r"\{\{\s*(.*?)\s*\}\}")
 DOCX_CONTENT_TYPE = (
@@ -182,7 +185,15 @@ def build_template_word_document(
         for key, value in (template_context or {}).items()
     }
 
-    replace_template_placeholders(doc, chart_by_name, text_by_placeholder)
+    logger.info(
+        "[WordExport] template=%s charts=%d text_placeholders=%s",
+        template_path,
+        len(chart_by_name),
+        {k: v for k, v in text_by_placeholder.items()},
+    )
+
+    replaced = replace_template_placeholders(doc, chart_by_name, text_by_placeholder)
+    logger.info("[WordExport] total placeholders replaced=%d", replaced)
     remove_manual_page_breaks(doc)
     return save_document(doc)
 
@@ -335,11 +346,18 @@ def replace_template_placeholders_in_paragraph(
     replacements = 0
     for match in matches:
         placeholder = match.group(1).strip()
-        if (
-            normalize_chart_name(placeholder) in chart_by_name
-            or placeholder in text_by_placeholder
-        ):
+        if normalize_chart_name(placeholder) in chart_by_name:
             replacements += 1
+            logger.debug("[WordExport] placeholder %r -> chart image", placeholder)
+        elif placeholder in text_by_placeholder:
+            replacements += 1
+            logger.debug(
+                "[WordExport] placeholder %r -> %r",
+                placeholder,
+                text_by_placeholder[placeholder],
+            )
+        else:
+            logger.debug("[WordExport] placeholder %r unresolved (left as-is)", placeholder)
 
     if not replacements:
         return 0

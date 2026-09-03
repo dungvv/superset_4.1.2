@@ -106,6 +106,11 @@ const Styles = styled.div`
   min-height: ${p => p.height}px;
   position: relative;
 
+  &.chart-container--auto-height {
+    min-height: 0;
+    height: auto;
+  }
+
   .chart-tooltip {
     opacity: 0.75;
     font-size: ${({ theme }) => theme.typography.sizes.s}px;
@@ -117,6 +122,11 @@ const Styles = styled.div`
     justify-content: center;
 
     height: ${p => p.height}px;
+
+    &.slice-container--auto-height {
+      height: auto;
+      min-height: 0;
+    }
 
     .pivot_table tbody tr {
       font-feature-settings: 'tnum' 1;
@@ -263,7 +273,14 @@ class Chart extends PureComponent {
 
   renderChartContainer() {
     return (
-      <div className="slice_container" data-test="slice-container">
+      <div
+        className={`slice_container${
+          this.props.vizType === 'time_filter_chart'
+            ? ' slice-container--auto-height'
+            : ''
+        }`}
+        data-test="slice-container"
+      >
         {this.props.isInView ||
         !isFeatureEnabled(FeatureFlag.DashboardVirtualization) ||
         isCurrentUserBot() ? (

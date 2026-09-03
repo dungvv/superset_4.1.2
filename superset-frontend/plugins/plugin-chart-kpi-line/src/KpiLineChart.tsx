@@ -14,7 +14,7 @@ import {
   LegendComponent,
   DataZoomComponent,
   ToolboxComponent,
-  MarkPointComponent,
+  MarkLineComponent,
 } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import { KpiLineVizProps } from './types';
@@ -26,7 +26,7 @@ echarts.use([
   LegendComponent,
   DataZoomComponent,
   ToolboxComponent,
-  MarkPointComponent,
+  MarkLineComponent,
   CanvasRenderer,
 ]);
 

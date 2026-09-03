@@ -190,7 +190,7 @@ export const DashboardPage: FC<PageProps> = ({ idOrSlug }: PageProps) => {
       // when dashboard unmounts or changes
       return injectCustomCss(css);
     }
-    return () => {};
+    return () => { };
   }, [css]);
 
   useEffect(() => {
@@ -202,6 +202,37 @@ export const DashboardPage: FC<PageProps> = ({ idOrSlug }: PageProps) => {
       dispatch(setDatasources(datasets));
     }
   }, [addDangerToast, datasets, datasetsApiError, dispatch]);
+
+  useEffect(() => {
+    const AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+    const CHECK_INTERVAL_MS = 60 * 1000;
+    let lastReloadTime = Date.now();
+
+    const checkAndReload = () => {
+      if (Date.now() - lastReloadTime >= AUTO_REFRESH_INTERVAL_MS) {
+        console.log('reload');
+        window.location.reload();
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        if (Date.now() - lastReloadTime >= AUTO_REFRESH_INTERVAL_MS) {
+          console.log('reload');
+          window.location.reload();
+        }
+        lastReloadTime = Date.now();
+      }
+    };
+
+    const timer = setInterval(checkAndReload, CHECK_INTERVAL_MS);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
 
   if (error) throw error; // caught in error boundary
   if (!readyToRender || !hasDashboardInfoInitiated) return <Loading />;

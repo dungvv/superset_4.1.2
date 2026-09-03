@@ -16,27 +16,32 @@ const Container = styled.div`
   display: flex;
   flex-direction: column;
   width: 100%;
-  height: 100%;
-  min-height: 80px;
-  padding: 12px;
-  gap: 8px;
+  height: auto;
+  min-height: 0;
+  padding: 0 8px 2px;
+  gap: 2px;
   font-family: sans-serif;
   box-sizing: border-box;
   overflow-y: auto;
 `;
 
 const Label = styled.label`
+  display: block;
+  margin: 0;
   font-size: 12px;
   font-weight: 600;
+  line-height: 14px;
   color: ${({ theme }) => theme.colors.grayscale.dark1};
 `;
 
 const StyledDatePicker = styled(AntdDatePicker)`
   width: 100%;
+  height: 28px;
+  padding: 0 8px;
   border-radius: ${({ theme }) => theme.gridUnit}px;
 
   .ant-picker-input > input {
-    font-size: 13px;
+    font-size: 12px;
   }
 `;
 

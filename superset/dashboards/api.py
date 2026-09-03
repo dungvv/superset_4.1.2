@@ -1769,11 +1769,26 @@ class DashboardRestApi(BaseSupersetModelRestApi):
 
             charts = data["charts"]
             dashboard_title = data.get("dashboard_title", "Dashboard Export")
+            logger.info(
+                "[WordExport] request: time_grain=%r start=%r end=%r "
+                "title=%r charts=%d chart_names=%s kpi_count_keys=%s",
+                data.get("time_grain"),
+                data.get("current_start_date"),
+                data.get("current_end_date"),
+                dashboard_title,
+                len(charts),
+                [c.get("name") for c in charts],
+                sorted((data.get("kpi_counts") or {}).keys()),
+            )
             template_context = build_template_context(
                 str(data.get("time_grain", "")),
                 str(data.get("current_start_date", "")),
                 str(data.get("current_end_date", "")),
                 data.get("kpi_counts"),
+            )
+            logger.info(
+                "[WordExport] template_context (image data excluded): %s",
+                template_context,
             )
             try:
                 dashboard = DashboardDAO.get_by_id_or_slug(id_or_slug)
@@ -1803,12 +1818,19 @@ class DashboardRestApi(BaseSupersetModelRestApi):
                 dashboard.dashboard_title,
                 template_dashboards,
             ):
+                logger.info(
+                    "[WordExport] template mode: path=%r grain=%r", template_path, time_grain
+                )
                 output = build_template_word_document(
                     charts,
                     template_path,
                     template_context,
                 )
             else:
+                logger.info(
+                    "[WordExport] default mode (dashboard %r not in template list)",
+                    dashboard.id,
+                )
                 output = build_default_word_document(charts, dashboard_title)
 
             filename = f"{dashboard_title.replace(' ', '_')}_export.docx"

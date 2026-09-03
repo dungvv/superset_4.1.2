@@ -53,6 +53,11 @@ function fmtRatio(value: number): string {
     maximumFractionDigits: 2,
   });
 }
+function fmtRatioTrimTrailingZero(value: number): string {
+  const formatted = fmtRatio(value);
+  if (formatted === '100,00') return '100,0';
+  return formatted;
+}
 function fmtInt(value: number): string {
   return value.toLocaleString(VI);
 }
@@ -226,7 +231,6 @@ export default function transformProps(
       })()
     : null;
 
-  const kpiSeries: SeriesDatum[] = [];
   const currentSeries: SeriesDatum[] = [];
   const prevSeries: SeriesDatum[] = [];
   const xAxisLabels: string[] = [];
@@ -236,13 +240,6 @@ export default function transformProps(
     if (xVal === null || xVal === undefined) return;
     const x = String(xVal);
     xAxisLabels.push(x);
-
-    if (kpiIdx >= 0) {
-      const kval = extractVal(row, kpiIdx);
-      if (kval !== null) {
-        kpiSeries.push([x, kval]);
-      }
-    }
 
     if (isThreeMetric) {
       const cur = extractVal(row, curIdx);
@@ -290,18 +287,19 @@ export default function transformProps(
   );
 
   const allXValues = [
-    ...kpiSeries.map(d => d[0]),
     ...currentSeries.map(d => d[0]),
     ...prevSeries.map(d => d[0]),
   ];
   const firstX = allXValues.length > 0 ? allXValues[0] : '';
   const lastX = allXValues.length > 0 ? allXValues[allXValues.length - 1] : '';
-  const firstKpiPoint = kpiSeries.find(datum => datum[1] !== null);
-  const { min: yAxisMin, max: yAxisMax } = getYAxisBounds([
-    kpiSeries,
-    currentSeries,
-    prevSeries,
-  ]);
+  const boundsInput: SeriesDatum[][] = [currentSeries, prevSeries];
+  if (avgKpi !== null && xAxisLabels.length > 0) {
+    boundsInput.push([
+      [xAxisLabels[0], avgKpi],
+      [xAxisLabels[xAxisLabels.length - 1], avgKpi],
+    ]);
+  }
+  const { min: yAxisMin, max: yAxisMax } = getYAxisBounds(boundsInput);
 
   const series: any[] = [
     {
@@ -326,12 +324,18 @@ export default function transformProps(
           if (value === null) {
             return '';
           }
-          // Use same interval as X-axis so labels align with ticks;
-          // always show at the last point.
-          const isLast = p.dataIndex === currentSeries.length - 1;
-          if (isLast) return fmtRatio(Number(value));
+          // Match the X-axis label interval by keying off the category index
+          // (p.name) instead of the series data index. currentSeries can be
+          // shorter than xAxisLabels when points are null/skipped, so using
+          // dataIndex would desync the value labels from the X-axis ticks.
+          const catIdx = xAxisLabels.indexOf(p.name);
+          if (catIdx < 0) {
+            return '';
+          }
+          const isLast = catIdx === xAxisLabels.length - 1;
+          if (isLast) return fmtRatioTrimTrailingZero(Number(value));
           const show = getXAxisLabelIntervalFn(xAxisLabels.length);
-          return show(p.dataIndex) ? fmtRatio(Number(value)) : '';
+          return show(catIdx) ? fmtRatioTrimTrailingZero(Number(value)) : '';
         },
       },
       // Interval thinning alone cannot prevent collisions: neighbouring labels
@@ -359,40 +363,26 @@ export default function transformProps(
     });
   }
 
-  if (kpiSeries.length > 0) {
+  if (avgKpi !== null) {
     series.push({
       name: t('KPI'),
       type: 'line',
-      data: kpiSeries,
+      data: [],
       z: 1,
-      smooth: false,
-      symbol: 'circle',
-      symbolSize: 4,
-      showSymbol: false,
-      lineStyle: { type: 'solid', width: 1, color: '#2CA02C' },
-      clip: true,
-      itemStyle: { color: '#2CA02C' },
-      markPoint: firstKpiPoint
-        ? {
-          symbol: 'circle',
-          symbolSize: 1,
-          //itemStyle: { color: 'transparent', opacity: 0 },
-          label: {
-            show: true,
-            position: 'top',
-            color: '#2CA02C',
-            fontSize: 15,
-            fontWeight: 600,
-            formatter: () => fmtRatio(Number(firstKpiPoint[1])),
-            offset: [0, -4],
-          },
-          data: [
-            {
-              coord: [firstKpiPoint[0], firstKpiPoint[1]],
-            },
-          ],
-        }
-        : undefined,
+      markLine: {
+        silent: true,
+        symbol: 'none',
+        lineStyle: { type: 'solid', width: 1, color: '#2CA02C' },
+        label: {
+          show: true,
+          position: 'insideStartTop',
+          color: '#2CA02C',
+          fontSize: 15,
+          fontWeight: 600,
+          formatter: () => fmtRatio(avgKpi),
+        },
+        data: [{ yAxis: avgKpi }],
+      },
     });
   }
 
@@ -474,7 +464,7 @@ export default function transformProps(
     },
     grid: {
       left: 8,
-      right: 8,
+      right: 12,
       top: 20,
       bottom: 17,
       containLabel: true,
@@ -513,10 +503,10 @@ export default function transformProps(
     currentSeries,
     prevSeries,
     kpiTargetSeries:
-      kpiSeries.length > 0
+      avgKpi !== null
         ? [
-          [firstX, kpiSeries[0][1]],
-          [lastX, kpiSeries[kpiSeries.length - 1][1]],
+          [firstX, avgKpi],
+          [lastX, avgKpi],
         ]
         : [],
     echartOptions,

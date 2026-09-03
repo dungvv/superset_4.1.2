@@ -15,7 +15,7 @@ interface ChartImageData {
 }
 
 interface KpiChartStatus {
-  group: 'none' | 'common' | 'key';
+  group: 'none' | 'common' | 'key' | 'main' | 'addon';
   status: 'passed' | 'failed' | 'no_data';
   title?: string;
   sliceId?: string;
@@ -37,6 +37,15 @@ interface KpiExportCounts {
   kpi_key_passed_rate: string;
   kpi_total_passed: number;
   kpi_total_not_passed: number;
+  kpi_ipcc_main_total: number;
+  kpi_ipcc_main_passed: number;
+  kpi_ipcc_main_not_passed: number;
+  kpi_ipcc_ao_total: number;
+  kpi_ipcc_ao_passed: number;
+  kpi_ipcc_ao_not_passed: number;
+  kpi_ipcc_total: number;
+  kpi_ipcc_total_passed: number;
+  kpi_ipcc_total_not_passed: number;
 }
 
 export const CHART_HOLDER_SELECTOR = '.dashboard-component-chart-holder';
@@ -222,7 +231,12 @@ function getKpiChartStatusKey(element: HTMLElement): string {
 function getKpiChartStatus(element: HTMLElement): KpiChartStatus {
   const chartContainer = element.closest('[data-test-chart-id]');
   const rawGroup = element.getAttribute('data-kpi-group');
-  const group = rawGroup === 'common' || rawGroup === 'key' ? rawGroup : 'none';
+  const group = rawGroup === 'common' ||
+    rawGroup === 'key' ||
+    rawGroup === 'main' ||
+    rawGroup === 'addon'
+    ? rawGroup
+    : 'none';
   const rawStatus = element.getAttribute('data-kpi-status');
   const status =
     rawStatus === 'passed' || rawStatus === 'failed' || rawStatus === 'no_data'
@@ -278,6 +292,15 @@ function buildKpiExportCounts(
     kpi_key_passed_rate: '0',
     kpi_total_passed: 0,
     kpi_total_not_passed: 0,
+    kpi_ipcc_main_total: 0,
+    kpi_ipcc_main_passed: 0,
+    kpi_ipcc_main_not_passed: 0,
+    kpi_ipcc_ao_total: 0,
+    kpi_ipcc_ao_passed: 0,
+    kpi_ipcc_ao_not_passed: 0,
+    kpi_ipcc_total: 0,
+    kpi_ipcc_total_passed: 0,
+    kpi_ipcc_total_not_passed: 0,
   };
 
   kpiCharts.forEach(chart => {
@@ -294,6 +317,16 @@ function buildKpiExportCounts(
       } else {
         counts.kpi_key_no_data += 1;
       }
+    } else if (chart.group === 'main') {
+      counts.kpi_ipcc_main_total += 1;
+      if (chart.status === 'passed') {
+        counts.kpi_ipcc_main_passed += 1;
+      }
+    } else if (chart.group === 'addon') {
+      counts.kpi_ipcc_ao_total += 1;
+      if (chart.status === 'passed') {
+        counts.kpi_ipcc_ao_passed += 1;
+      }
     } else {
       counts.kpi_common_total += 1;
       if (chart.status === 'passed') {
@@ -309,10 +342,20 @@ function buildKpiExportCounts(
   counts.kpi_common_not_passed =
     counts.kpi_common_total - counts.kpi_common_passed;
   counts.kpi_key_not_passed = counts.kpi_key_total - counts.kpi_key_passed;
+  counts.kpi_ipcc_main_not_passed =
+    counts.kpi_ipcc_main_total - counts.kpi_ipcc_main_passed;
+  counts.kpi_ipcc_ao_not_passed =
+    counts.kpi_ipcc_ao_total - counts.kpi_ipcc_ao_passed;
   counts.kpi_total = counts.kpi_common_total + counts.kpi_key_total;
   counts.kpi_total_passed = counts.kpi_common_passed + counts.kpi_key_passed;
   counts.kpi_total_not_passed =
     counts.kpi_common_not_passed + counts.kpi_key_not_passed;
+  counts.kpi_ipcc_total_passed =
+    counts.kpi_ipcc_main_passed + counts.kpi_ipcc_ao_passed;
+  counts.kpi_ipcc_total_not_passed =
+    counts.kpi_ipcc_main_not_passed + counts.kpi_ipcc_ao_not_passed;
+  counts.kpi_ipcc_total =
+    counts.kpi_ipcc_total_passed + counts.kpi_ipcc_total_not_passed;
   counts.kpi_common_passed_rate = calculatePassedRate(
     counts.kpi_common_passed,
     counts.kpi_common_total,
