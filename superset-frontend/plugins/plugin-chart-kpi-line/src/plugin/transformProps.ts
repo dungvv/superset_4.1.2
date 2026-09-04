@@ -135,6 +135,89 @@ function getXAxisLabelIntervalFn(
   return (index: number) => (last - index) % step === 0;
 }
 
+// Parse date strings in formats: dd/mm, mm/yyyy, qq/yyyy (quarter)
+// Returns timestamp for sorting, or null if unparseable
+function parseDateLabel(label: string): number | null {
+  const trimmed = label.trim();
+  const parts = trimmed.split(/[\/\-\.]/);
+
+  if (parts.length !== 2) return null;
+
+  const [first, second] = parts;
+  const firstNum = parseInt(first, 10);
+  const secondNum = parseInt(second, 10);
+
+  // Check for quarter format: Q1/2024, q2/24, 1/2024 (quarter)
+  const quarterMatch = trimmed.match(/^[Qq]?(\d)\s*[\/\-\.]\s*(\d{2,4})$/);
+  if (quarterMatch) {
+    const quarter = parseInt(quarterMatch[1], 10);
+    let year = parseInt(quarterMatch[2], 10);
+    if (year < 100) year += 2000;
+    if (quarter >= 1 && quarter <= 4) {
+      return new Date(year, (quarter - 1) * 3, 1).getTime();
+    }
+  }
+
+  // mm/yyyy format (4-digit year)
+  if (second.length === 4 && firstNum >= 1 && firstNum <= 12) {
+    return new Date(secondNum, firstNum - 1, 1).getTime();
+  }
+
+  // dd/mm format (2-digit month)
+  if (firstNum >= 1 && firstNum <= 31 && secondNum >= 1 && secondNum <= 12) {
+    // Assume current year for dd/mm
+    const year = new Date().getFullYear();
+    return new Date(year, secondNum - 1, firstNum).getTime();
+  }
+
+  return null;
+}
+
+// Sort xAxisLabels and series data chronologically
+function sortByTime(
+  xAxisLabels: string[],
+  currentSeries: SeriesDatum[],
+  prevSeries: SeriesDatum[],
+): void {
+  if (xAxisLabels.length <= 1) return;
+
+  // Parse all labels and check if all are parseable
+  const parsed = xAxisLabels.map(label => ({
+    label,
+    time: parseDateLabel(label),
+  }));
+
+  const allParseable = parsed.every(item => item.time !== null);
+  if (!allParseable) return;
+
+  // Sort by timestamp
+  parsed.sort((a, b) => (a.time as number) - (b.time as number));
+
+  // Build sorted labels
+  const sortedLabels = parsed.map(item => item.label);
+
+  // Build label -> sorted index map
+  const labelOrder = new Map<string, number>();
+  sortedLabels.forEach((label, idx) => labelOrder.set(label, idx));
+
+  // Sort series by label order
+  const sortSeries = (series: SeriesDatum[]) => {
+    series.sort((a, b) => {
+      const orderA = labelOrder.get(a[0]) ?? 0;
+      const orderB = labelOrder.get(b[0]) ?? 0;
+      return orderA - orderB;
+    });
+  };
+
+  // Update xAxisLabels in place
+  xAxisLabels.length = 0;
+  sortedLabels.forEach(label => xAxisLabels.push(label));
+
+  // Sort series data
+  sortSeries(currentSeries);
+  sortSeries(prevSeries);
+}
+
 
 export default function transformProps(
   chartProps: KpiLineChartProps,
@@ -265,6 +348,8 @@ export default function transformProps(
       }
     }
   });
+
+  sortByTime(xAxisLabels, currentSeries, prevSeries);
 
   const kpiComparison = getComparison(currentRatio, avgKpi, kpiGoalDirection);
   const prevPeriodComparison = getComparison(
