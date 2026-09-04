@@ -173,9 +173,11 @@ test('line value labels follow X-axis interval, last point always shown', () => 
       ),
     ]);
     const [currentSeries] = (props.echartOptions as any).series;
+    const datum = currentSeries.data[dataIndex];
     return currentSeries.label.formatter({
-      data: currentSeries.data[dataIndex],
+      data: datum,
       dataIndex,
+      name: datum?.[0],
     });
   };
 

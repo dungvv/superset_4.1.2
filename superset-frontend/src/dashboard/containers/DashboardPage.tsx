@@ -204,13 +204,12 @@ export const DashboardPage: FC<PageProps> = ({ idOrSlug }: PageProps) => {
   }, [addDangerToast, datasets, datasetsApiError, dispatch]);
 
   useEffect(() => {
-    const AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+    const AUTO_REFRESH_INTERVAL_MS = 15 * 60 * 1000;
     const CHECK_INTERVAL_MS = 60 * 1000;
     let lastReloadTime = Date.now();
 
     const checkAndReload = () => {
       if (Date.now() - lastReloadTime >= AUTO_REFRESH_INTERVAL_MS) {
-        console.log('reload');
         window.location.reload();
       }
     };
@@ -218,7 +217,6 @@ export const DashboardPage: FC<PageProps> = ({ idOrSlug }: PageProps) => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         if (Date.now() - lastReloadTime >= AUTO_REFRESH_INTERVAL_MS) {
-          console.log('reload');
           window.location.reload();
         }
         lastReloadTime = Date.now();
