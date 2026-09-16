@@ -32,7 +32,6 @@ from superset.commands.dashboard.exceptions import (
 )
 from superset.commands.utils import populate_roles, update_tags, validate_tags
 from superset.daos.dashboard import DashboardDAO
-from superset.exceptions import SupersetSecurityException
 from superset.models.dashboard import Dashboard
 from superset.tags.models import ObjectType
 from superset.utils import json
@@ -76,11 +75,13 @@ class UpdateDashboardCommand(UpdateMixin, BaseCommand):
         self._model = DashboardDAO.find_by_id(self._model_id)
         if not self._model:
             raise DashboardNotFoundError()
-        # Check ownership
-        try:
-            security_manager.raise_for_ownership(self._model)
-        except SupersetSecurityException as ex:
-            raise DashboardForbiddenError() from ex
+        # Admin / Alpha / dashboard owner may edit
+        if not (
+            security_manager.is_admin()
+            or security_manager.is_alpha()
+            or security_manager.is_owner(self._model)
+        ):
+            raise DashboardForbiddenError()
 
         # Validate slug uniqueness
         if not DashboardDAO.validate_update_slug_uniqueness(self._model_id, slug):

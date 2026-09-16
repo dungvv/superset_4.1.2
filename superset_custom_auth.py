@@ -34,9 +34,14 @@ ROLE_MAPPING = {
     "ADMIN": "Admin",
     "GRP_ALPHA": "Alpha",
     "ALPHA": "Alpha",
+    "GRP_GAMMA": "Gamma",
     "GAMMA": "Gamma",
     "PUBLIC": "Public",
 }
+
+# Role names that may view every dashboard (case-insensitive).
+GLOBAL_DASHBOARD_VIEWER_ROLE_NAMES = {"gamma"}
+CONTENT_EDITOR_ROLE_NAMES = {"alpha", "grp_alpha"}
 
 ALWAYS_INCLUDE_ROLES = ["sql_lab", "Jinja Template"]
 
@@ -141,11 +146,57 @@ class ExternalAPIAuthManager(SupersetSecurityManager):
                     role=self.find_role("Public"),  # Default role, can be changed
                 )
                 logger.info(f"Created new user from external API: {username}")
+            # Keep DB roles in sync with partner groupRoleCode (Gamma/Alpha/Admin)
+            self._sync_external_role_to_user(user)
             return user
 
         # Fallback to database authentication
         logger.debug("Now try login with database authentication")
         return super().auth_user_db(username, password)
+
+    def _sync_external_role_to_user(self, user: Optional[User]) -> None:
+        """Attach mapped external role onto ab_user_role so list filters see it."""
+        if not user:
+            return
+        external = self._session_external_user() or {}
+        raw_roles = [r for r in (external.get("roles") or []) if r]
+        if not raw_roles:
+            return
+        try:
+            from superset.extensions import db as session_db
+        except Exception:
+            try:
+                from flask_appbuilder import db as session_db
+            except Exception:
+                session_db = None
+        if session_db is None:
+            return
+
+        changed = False
+        for raw in raw_roles:
+            role = self._find_role_ci(raw)
+            if role is None:
+                continue
+            current = list(getattr(user, "roles", []) or [])
+            if role.id not in {r.id for r in current if r}:
+                user.roles.append(role)
+                changed = True
+                logger.warning(
+                    "Synced external role %r -> %s for user %s",
+                    raw,
+                    role.name,
+                    user.username,
+                )
+        if changed:
+            try:
+                session_db.session.merge(user)
+                session_db.session.commit()
+            except Exception as ex:
+                logger.exception("Failed syncing external role for %s: %s", user.username, ex)
+                try:
+                    session_db.session.rollback()
+                except Exception:
+                    pass
 
     def _verify_external_api(
         self, username: str, password: Optional[str] = None
@@ -184,16 +235,23 @@ class ExternalAPIAuthManager(SupersetSecurityManager):
             or login_result.get("groupRoleCode")
             or login_result.get("roleCode")
         )
+        mapped = self._find_role_ci(role_code) if role_code else None
+        # Prefer canonical Superset role name in session (e.g. Gamma not GAMMA)
+        session_role = mapped.name if mapped else role_code
         user_info = {
             "username": username,
             "email": f"{username}@unitel-report.com",
             "first_name": username,
             "last_name": username,
-            "roles": [role_code] if role_code else [],
+            "roles": [session_role] if session_role else [],
+            "groupRoleCode": role_code,
         }
         session["external_api_user"] = user_info
-        logger.info(
-            "External API login ok for %s, groupRoleCode=%r", username, role_code
+        logger.warning(
+            "External API login ok for %s, groupRoleCode=%r mapped=%r",
+            username,
+            role_code,
+            session_role,
         )
         return True
 
@@ -294,6 +352,129 @@ class ExternalAPIAuthManager(SupersetSecurityManager):
             [r.name for r in final],
         )
         return final
+
+    def _role_names_lower(self) -> set:
+        try:
+            names = {
+                (r.name or "").strip().lower()
+                for r in self.get_user_roles()
+                if r and r.name
+            }
+        except Exception:
+            names = set()
+        # Also recognize external API codes before mapping (GAMMA / ALPHA / GRP_ALPHA)
+        try:
+            for raw in (self._session_external_user() or {}).get("roles") or []:
+                code = str(raw).strip()
+                if not code:
+                    continue
+                names.add(code.lower())
+                mapped = (
+                    ROLE_MAPPING.get(code)
+                    or ROLE_MAPPING.get(code.upper())
+                    or ROLE_MAPPING.get(code.lower())
+                )
+                if mapped:
+                    names.add(str(mapped).lower())
+        except Exception:
+            pass
+        return names
+
+    def is_alpha(self) -> bool:
+        names = self._role_names_lower()
+        return bool(names & CONTENT_EDITOR_ROLE_NAMES) or "alpha" in names
+
+    def is_gamma(self) -> bool:
+        names = self._role_names_lower()
+        if names & GLOBAL_DASHBOARD_VIEWER_ROLE_NAMES or "gamma" in names:
+            return True
+        # Match by role id (handles renamed display but same Gamma row, etc.)
+        for label in ("Gamma", "GAMMA", "gamma"):
+            role = self.find_role(label) or self._find_role_ci(label)
+            if role and any(r and r.id == role.id for r in self.get_user_roles()):
+                return True
+        return False
+
+    def can_view_all_dashboards(self) -> bool:
+        ok = self.is_admin() or self.is_alpha() or self.is_gamma()
+        logger.warning(
+            "can_view_all_dashboards=%s roles=%s",
+            ok,
+            sorted(self._role_names_lower()),
+        )
+        return ok
+
+    def can_view_all_published_dashboards(self) -> bool:
+        return self.can_view_all_dashboards()
+
+    def can_access_all_datasources(self) -> bool:
+        if self.is_alpha() or self.is_admin():
+            return True
+        return super().can_access_all_datasources()
+
+    def can_access_all_databases(self) -> bool:
+        if self.is_alpha() or self.is_admin():
+            return True
+        return super().can_access_all_databases()
+
+    def can_access(self, permission_name: str, view_name: str) -> bool:
+        """
+        Alpha: full content CRUD without needing every PVM checked manually.
+        Does not grant Admin-only Security / User / Role menus.
+        """
+        if self.is_alpha() and view_name in {
+            "Dashboard",
+            "Chart",
+            "Dataset",
+            "Database",
+            "Datasource",
+            "DashboardFilterStateRestApi",
+        }:
+            if permission_name in {
+                "can_read",
+                "can_write",
+                "can_export",
+                "can_overwrite",
+                "can_duplicate",
+                "menu_access",
+            }:
+                return True
+        return super().can_access(permission_name, view_name)
+
+    def raise_for_ownership(self, resource) -> None:
+        """
+        Admin + Alpha may edit any content. Dashboard owners may edit
+        charts/datasets on their dashboards. Falls back to parent otherwise.
+        """
+        if self.is_admin() or self.is_alpha():
+            return
+
+        # Prefer parent implementation when available (dashboard-owner → chart/dataset)
+        parent_raise = getattr(SupersetSecurityManager, "raise_for_ownership", None)
+        if parent_raise is not None:
+            return parent_raise(self, resource)
+
+        # Minimal fallback for older managers: only direct owners
+        from flask import g
+
+        orig = self.get_session.query(resource.__class__).get(resource.id)
+        owners = orig.owners if orig is not None and hasattr(orig, "owners") else []
+        if getattr(g, "user", None) is not None and not g.user.is_anonymous and g.user in owners:
+            return
+        from flask_babel import lazy_gettext as _
+        from superset.errors import ErrorLevel, SupersetError, SupersetErrorType
+        from superset.exceptions import SupersetSecurityException
+
+        raise SupersetSecurityException(
+            SupersetError(
+                error_type=SupersetErrorType.MISSING_OWNERSHIP_ERROR,
+                message=_(
+                    "You don't have the rights to alter %(resource)s",
+                    resource=resource,
+                ),
+                level=ErrorLevel.ERROR,
+            )
+        )
 
     """
     Alternative implementation for token-based authentication

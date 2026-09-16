@@ -801,8 +801,12 @@ class Superset(BaseSupersetView):
             dashboard_id=dashboard.id,
             dashboard_version="v2",
             dash_edit_perm=(
-                security_manager.is_owner(dashboard)
-                and security_manager.can_access("can_write", "Dashboard")
+                security_manager.is_admin()
+                or security_manager.is_alpha()
+                or (
+                    security_manager.is_owner(dashboard)
+                    and security_manager.can_access("can_write", "Dashboard")
+                )
             ),
             edit_mode=(
                 request.args.get(ReservedUrlParameters.EDIT_MODE.value) == "true"

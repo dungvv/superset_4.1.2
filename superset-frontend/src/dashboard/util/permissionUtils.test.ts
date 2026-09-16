@@ -58,6 +58,7 @@ const outsiderUser: UserWithPermissionsAndRoles = {
   ...ownerUser,
   userId: 3,
   username: 'outsider',
+  roles: { Gamma: [['can_read', 'Dashboard'], ['can_write', 'Dashboard']] },
 };
 
 const owner: Owner = {
@@ -110,8 +111,24 @@ describe('canUserEditDashboard', () => {
   it('allows admin users to edit regardless of ownership', () => {
     expect(canUserEditDashboard(dashboard, adminUser)).toEqual(true);
   });
-  it('rejects non-owners', () => {
+  it('allows Alpha users to edit regardless of ownership', () => {
+    expect(
+      canUserEditDashboard(dashboard, {
+        ...outsiderUser,
+        roles: { Alpha: [['can_write', 'Dashboard']] },
+      }),
+    ).toEqual(true);
+  });
+  it('rejects non-owners without Admin/Alpha', () => {
     expect(canUserEditDashboard(dashboard, outsiderUser)).toEqual(false);
+  });
+  it('rejects Gamma viewers even with can_write leftover', () => {
+    expect(
+      canUserEditDashboard(dashboard, {
+        ...outsiderUser,
+        roles: { Gamma: [['can_write', 'Dashboard']] },
+      }),
+    ).toEqual(false);
   });
   it('rejects nonexistent users', () => {
     expect(canUserEditDashboard(dashboard, null)).toEqual(false);
@@ -150,8 +167,28 @@ describe('canUserOverwriteChart', () => {
   it('allows admin users who are not owners', () => {
     expect(canUserOverwriteChart(slice, adminUser)).toEqual(true);
   });
+  it('allows Alpha users who are not owners', () => {
+    expect(
+      canUserOverwriteChart(slice, {
+        ...outsiderUser,
+        roles: { Alpha: [['can_write', 'Chart']] },
+      }),
+    ).toEqual(true);
+  });
   it('rejects non-owners', () => {
     expect(canUserOverwriteChart(slice, outsiderUser)).toEqual(false);
+  });
+  it('allows overwrite when user owns the parent dashboard', () => {
+    expect(
+      canUserOverwriteChart(
+        {
+          owners: [99],
+          is_managed_externally: false,
+          dashboards: [{ owners: [{ id: 1 }] }],
+        },
+        ownerUser,
+      ),
+    ).toEqual(true);
   });
   it('rejects externally managed charts', () => {
     expect(
