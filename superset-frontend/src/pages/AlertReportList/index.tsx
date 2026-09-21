@@ -210,6 +210,10 @@ function AlertList({
     }
   };
 
+  const handleBulkSendNow = (_alertsToSend: AlertObject[]) => {
+    // UI only for now — backend execute/bulk-send API not wired yet
+  };
+
   const initialSort = [{ id: 'name', desc: true }];
 
   const toggleActive = useCallback(
@@ -590,6 +594,12 @@ function AlertList({
         {confirmDelete => {
           const bulkActions: ListViewProps['bulkActions'] = canDelete
             ? [
+                {
+                  key: 'send_now',
+                  name: t('Send now'),
+                  onSelect: handleBulkSendNow,
+                  type: 'primary',
+                },
                 {
                   key: 'delete',
                   name: t('Delete'),

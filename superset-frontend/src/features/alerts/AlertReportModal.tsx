@@ -68,6 +68,7 @@ import { useSelector } from 'react-redux';
 import { UserWithPermissionsAndRoles } from 'src/types/bootstrapTypes';
 import NumberInput from './components/NumberInput';
 import { AlertReportCronScheduler } from './components/AlertReportCronScheduler';
+import DependencyCheck from './components/DependencyCheck';
 import { NotificationMethod } from './components/NotificationMethod';
 import ValidatedPanelHeader from './components/ValidatedPanelHeader';
 import StyledPanel from './components/StyledPanel';
@@ -362,6 +363,7 @@ export const TRANSLATIONS = {
   REPORT_CONTENTS_TITLE: t('Report contents'),
   SCHEDULE_TITLE: t('Schedule'),
   NOTIFICATION_TITLE: t('Notification method'),
+  DEPENDENCY_CHECK_TITLE: t('Dependency-Check'),
   // Error text
   NAME_ERROR_TEXT: t('name'),
   OWNERS_ERROR_TEXT: t('owners'),
@@ -431,6 +433,9 @@ const AlertReportModal: FunctionComponent<AlertReportModalProps> = ({
   );
   const [sendAsZip, setSendAsZip] = useState<boolean | undefined>(undefined);
   const [forceScreenshot, setForceScreenshot] = useState<boolean>(false);
+  const [dependencyCheckEnabled, setDependencyCheckEnabled] =
+    useState<boolean>(false);
+  const [dependencyTables, setDependencyTables] = useState<string>('');
 
   const [isScreenshot, setIsScreenshot] = useState<boolean>(false);
   useEffect(() => {
@@ -613,6 +618,8 @@ const AlertReportModal: FunctionComponent<AlertReportModalProps> = ({
     setNotificationSettings([]);
     setCurrentAlert({ ...defaultAlert });
     setNotificationAddState('active');
+    setDependencyCheckEnabled(false);
+    setDependencyTables('');
   };
 
   const onSave = () => {
@@ -656,6 +663,10 @@ const AlertReportModal: FunctionComponent<AlertReportModalProps> = ({
           ? JSON.parse(currentAlert.extra)
           : currentAlert?.extra || {}),
         send_as_zip: sendAsZip !== undefined ? sendAsZip : true,
+        dependency_check: {
+          enabled: dependencyCheckEnabled,
+          tables: dependencyCheckEnabled ? dependencyTables : '',
+        },
       },
     };
 
@@ -1186,6 +1197,8 @@ const AlertReportModal: FunctionComponent<AlertReportModalProps> = ({
         },
       ]);
       setNotificationAddState('active');
+      setDependencyCheckEnabled(false);
+      setDependencyTables('');
     }
   }, [alert]);
 
@@ -1229,8 +1242,12 @@ const AlertReportModal: FunctionComponent<AlertReportModalProps> = ({
       if (resource.extra) {
         const extra = typeof resource.extra === 'string' ? JSON.parse(resource.extra) : resource.extra;
         setSendAsZip(extra.send_as_zip);
+        setDependencyCheckEnabled(!!extra.dependency_check?.enabled);
+        setDependencyTables(extra.dependency_check?.tables || '');
       } else {
         setSendAsZip(undefined);
+        setDependencyCheckEnabled(false);
+        setDependencyTables('');
       }
 
       setCurrentAlert({
@@ -1837,6 +1854,26 @@ const AlertReportModal: FunctionComponent<AlertReportModalProps> = ({
               />
             )
           }
+        </StyledPanel>
+        <StyledPanel
+          header={
+            <ValidatedPanelHeader
+              title={TRANSLATIONS.DEPENDENCY_CHECK_TITLE}
+              subtitle={t(
+                'Optionally check sync status of dependent tables before sending.',
+              )}
+              validateCheckStatus
+              testId="dependency-check-panel"
+            />
+          }
+          key="dependency-check"
+        >
+          <DependencyCheck
+            enabled={dependencyCheckEnabled}
+            tables={dependencyTables}
+            onEnabledChange={setDependencyCheckEnabled}
+            onTablesChange={setDependencyTables}
+          />
         </StyledPanel>
       </Collapse>
     </StyledModal>
