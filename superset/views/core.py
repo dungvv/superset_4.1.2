@@ -55,6 +55,7 @@ from superset.commands.explore.permalink.get import GetExplorePermalinkCommand
 from superset.common.chart_data import ChartDataResultFormat, ChartDataResultType
 from superset.connectors.sqla.models import BaseDatasource, SqlaTable
 from superset.daos.chart import ChartDAO
+from superset.daos.dashboard import DashboardDAO
 from superset.daos.datasource import DatasourceDAO
 from superset.dashboards.permalink.exceptions import DashboardPermalinkGetFailedError
 from superset.exceptions import (
@@ -922,3 +923,66 @@ class Superset(BaseSupersetView):
     @deprecated(new_target="/sqllab/history")
     def sqllab_history(self) -> FlaskResponse:
         return redirect("/sqllab/history")
+
+    @expose("/video-wall/")
+    @expose("/video-wall/<int:dashboard_id>/")
+    def video_wall(self, dashboard_id: int | None = None) -> FlaskResponse:
+        """Video wall view for displaying multiple charts in a grid layout."""
+        import json as json_module
+        from pathlib import Path
+
+        # Try to load config from file
+        config_file = Path(app.config.get("VIDEO_WALL_CONFIG_PATH", "video_wall_config.json"))
+        charts_config = []
+        rotation_interval = 30
+        dashboard_title = "Video Wall"
+
+        if config_file.exists():
+            try:
+                with open(config_file, "r", encoding="utf-8") as f:
+                    config_data = json_module.load(f)
+                    charts_config = config_data.get("charts", [])
+                    rotation_interval = config_data.get("rotationInterval", 30)
+            except Exception as ex:
+                logger.warning("Failed to load video wall config: %s", ex)
+
+        # If dashboard_id is provided, get charts from dashboard
+        if dashboard_id and not charts_config:
+            try:
+                dashboard = DashboardDAO.get_by_id_or_slug(str(dashboard_id))
+                dashboard_title = dashboard.dashboard_title
+                for slc in dashboard.slices:
+                    charts_config.append({
+                        "id": slc.id,
+                        "title": slc.slice_name or f"Chart {slc.id}",
+                        "url": f"/explore/?slice_id={slc.id}&standalone=true",
+                    })
+            except Exception as ex:
+                logger.warning("Failed to load charts from dashboard %s: %s", dashboard_id, ex)
+
+        # Get charts from URL params if provided
+        chart_ids = request.args.get("charts", "")
+        if chart_ids and not charts_config:
+            try:
+                ids = [int(x.strip()) for x in chart_ids.split(",") if x.strip()]
+                for chart_id in ids:
+                    slc = Slice.get(chart_id)
+                    if slc:
+                        charts_config.append({
+                            "id": slc.id,
+                            "title": slc.slice_name or f"Chart {slc.id}",
+                            "url": f"/explore/?slice_id={slc.id}&standalone=true",
+                        })
+            except Exception as ex:
+                logger.warning("Failed to load charts from URL params: %s", ex)
+
+        # Build absolute URL for iframe
+        superset_url = request.host_url.rstrip("/")
+
+        return self.render_template(
+            "superset/video_wall.html",
+            superset_url=superset_url,
+            charts_json=json_module.dumps(charts_config),
+            rotation_interval=rotation_interval,
+            dashboard_title=dashboard_title,
+        )

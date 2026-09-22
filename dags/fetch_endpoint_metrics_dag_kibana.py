@@ -1,19 +1,15 @@
-"""DAG 13 phút — endpoint metrics Elasticsearch → Oracle.
+"""DAG 13 phút — endpoint metrics Kibana → Oracle.
 
-
-Nguồn: Elasticsearch umoney logs (conn=es_umoney)
+Nguồn: Kibana API proxy (logs-YYYY.MM.DD)
 Đích:  endpoint_metrics (conn=oracle_default)
-
 
 Mỗi lần chạy (không sensor dependency):
   1) Xóa METRIC_DATE thuộc hôm qua VÀ hôm nay (Asia/Ho_Chi_Minh)
   2) Tính KPI 2 ngày (hôm qua + hôm nay) → INSERT lại
 
-
 METRIC_DATE:
   - Ngày N-1: YYYY-MM-DD 00:00:00 (số liệu ngày đã chốt)
   - Ngày N:   YYYY-MM-DD HH24:MI:SS theo thời điểm run (near-realtime)
-
 
 Lịch: */13 (Asia/Ho_Chi_Minh)
 Conf (optional): data_dates = "YYYY-MM-DD,YYYY-MM-DD" — override list ngày load
@@ -22,6 +18,7 @@ from __future__ import annotations
 
 
 import logging
+import requests
 from datetime import datetime, timedelta
 
 
@@ -35,9 +32,6 @@ from airflow.providers.oracle.hooks.oracle import OracleHook
 from airflow.utils.task_group import TaskGroup
 
 
-from common import elastic_functions as ef
-
-
 logger = logging.getLogger(__name__)
 
 
@@ -45,7 +39,9 @@ vn_tz = pendulum.timezone("Asia/Ho_Chi_Minh")
 DATE_FMT = "YYYY-MM-DD"
 
 
-ES_CONN_ID = Variable.get("es_conn_id", default_var="es_umoney")
+KIBANA_URL = Variable.get("kibana_url", default_var="http://10.120.54.62:9998")
+KIBANA_USER = Variable.get("kibana_user", default_var="fetek")
+KIBANA_PASS = Variable.get("kibana_pass", default_var="stl_fetek_dt2")
 ORACLE_CONN_ID = Variable.get("oracle_conn_id", default_var="dwh_oracle")
 
 
@@ -147,6 +143,29 @@ def generate_info_endpoint_metrics(**kwargs) -> None:
 
 
 
+def _kibana_login(session: requests.Session) -> None:
+    """Login vào Kibana để lấy session cookie."""
+    login_url = f"{KIBANA_URL}/internal/security/login"
+    payload = {
+        "providerType": "basic",
+        "providerName": "basic",
+        "currentURL": f"{KIBANA_URL}/login?next=%2Fapp%2Fdev_tools#/console",
+        "params": {
+            "username": KIBANA_USER,
+            "password": KIBANA_PASS,
+        },
+    }
+    headers = {
+        "kbn-version": "8.7.0",
+        "Content-Type": "application/json",
+    }
+    response = session.post(login_url, json=payload, headers=headers, timeout=30)
+    response.raise_for_status()
+    logger.info("Kibana login successful")
+
+
+
+
 def _build_metrics_query(target_date: str) -> dict:
     next_date = (
         datetime.strptime(target_date, "%Y-%m-%d") + timedelta(days=1)
@@ -200,11 +219,29 @@ def _build_metrics_query(target_date: str) -> dict:
 
 
 
-def _fetch_data(target_date: str) -> dict:
-    es = ef.get_es_client(ES_CONN_ID)
-    index = ef.get_index_pattern(target_date, target_date)
-    query = _build_metrics_query(target_date)
-    return es.search(index=index, body=query)
+def _fetch_data(session: requests.Session, target_date: str) -> dict:
+    """Gọi Kibana API proxy để query Elasticsearch."""
+    index = f"logs-{target_date.replace('-', '.')}"
+    proxy_url = f"{KIBANA_URL}/api/console/proxy"
+    params = {
+        "path": f"{index}/_search",
+        "method": "GET",
+    }
+    headers = {
+        "kbn-version": "8.7.0",
+        "Content-Type": "application/json",
+    }
+    query_body = _build_metrics_query(target_date)
+    
+    response = session.post(
+        proxy_url,
+        params=params,
+        headers=headers,
+        json=query_body,
+        timeout=120,
+    )
+    response.raise_for_status()
+    return response.json()
 
 
 
@@ -341,16 +378,16 @@ default_args = {
 
 
 with DAG(
-    dag_id="FETCH_ENDPOINT_METRICS_DAG",
+    dag_id="FETCH_ENDPOINT_METRICS_DAG_KIBANA",
     default_args=default_args,
     description=(
-        "Elasticsearch endpoint metrics → endpoint_metrics "
+        "Kibana API endpoint metrics → endpoint_metrics "
         "mỗi 13' — xóa+ghi hôm qua & hôm nay (không dependency)"
     ),
     schedule_interval="*/13 * * * *",
     concurrency=5,
     max_active_runs=1,
-    tags=["elasticsearch", "oracle", "metrics", "endpoint_metrics"],
+    tags=["kibana", "oracle", "metrics", "endpoint_metrics"],
     catchup=False,
 ) as dag:
 
@@ -371,8 +408,38 @@ with DAG(
     with TaskGroup("sync_fact_append_taskgroup", dag=dag) as sync_fact_append_taskgroup:
 
 
-        def delete_and_insert_all_days(**kwargs):
-            """Xóa + INSERT trong cùng 1 transaction."""
+        def delete_today_and_yesterday(**kwargs):
+            """Xóa toàn bộ METRIC_DATE thuộc các ngày cần reload."""
+            ti = kwargs["ti"]
+            raw = ti.xcom_pull(task_ids="generate_info", key="metric_dates")
+            if not raw:
+                raise ValueError("generate_info phải có metric_dates.")
+            days = [d.strip() for d in str(raw).split(",") if d.strip()]
+            sql = (
+                f"DELETE FROM {dest_table_name} "
+                "WHERE METRIC_DATE >= TO_DATE(:d, 'YYYY-MM-DD') "
+                "AND METRIC_DATE < TO_DATE(:d, 'YYYY-MM-DD') + 1"
+            )
+            hook = OracleHook(oracle_conn_id=dest_conn_id)
+            conn = hook.get_conn()
+            try:
+                cursor = conn.cursor()
+                total = 0
+                for d in days:
+                    cursor.execute(sql, {"d": d})
+                    total += cursor.rowcount or 0
+                    print(f"delete METRIC_DATE={d}, rows={cursor.rowcount}")
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+            print(f"delete_today_and_yesterday: days={days}, deleted={total}")
+
+
+        def fetch_and_insert_all_days(**kwargs):
+            """Query Kibana API từng ngày trong metric_dates rồi INSERT vào Oracle."""
             ti = kwargs["ti"]
             raw = ti.xcom_pull(task_ids="generate_info", key="metric_dates")
             today = ti.xcom_pull(task_ids="generate_info", key="today")
@@ -382,21 +449,40 @@ with DAG(
 
 
             days = [d.strip() for d in str(raw).split(",") if d.strip()]
+            
+            # Tạo session và login Kibana
+            session = requests.Session()
+            _kibana_login(session)
+            
             rows_by_day = {}
             for day_label in days:
                 metric_date_value = _metric_date_value(day_label, today, run_at)
-                data = _fetch_data(day_label)
-                rows_by_day[day_label] = _build_insert_rows(data, metric_date_value)
-
-
+                data = _fetch_data(session, day_label)
+                rows = _build_insert_rows(data, metric_date_value)
+                rows_by_day[day_label] = rows
+                print(
+                    f"fetch: day={day_label}, "
+                    f"METRIC_DATE={metric_date_value}, rows={len(rows)}"
+                )
+            
             _delete_and_insert(dest_table_name, days, rows_by_day)
 
 
-        sync_task = PythonOperator(
-            task_id="delete_and_insert",
-            python_callable=delete_and_insert_all_days,
+        delete_task = PythonOperator(
+            task_id="delete_today_and_yesterday",
+            python_callable=delete_today_and_yesterday,
+            execution_timeout=timedelta(minutes=10),
+        )
+
+
+        fetch_and_insert_task = PythonOperator(
+            task_id="fetch_and_insert",
+            python_callable=fetch_and_insert_all_days,
             execution_timeout=timedelta(minutes=30),
         )
+
+
+        delete_task >> fetch_and_insert_task
 
 
     (

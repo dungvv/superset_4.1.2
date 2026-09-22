@@ -1,0 +1,26 @@
+{
+  "supersetUrl": "http://localhost:8088",
+  "rotationInterval": 30,
+  "charts": [
+    {
+      "id": 10,
+      "title": "KPI Doanh thu",
+      "url": "/explore/?slice_id=10&standalone=true"
+    },
+    {
+      "id": 11,
+      "title": "Tỷ lệ chuyển đổi",
+      "url": "/explore/?slice_id=11&standalone=true"
+    },
+    {
+      "id": 12,
+      "title": "Xu hướng người dùng",
+      "url": "/explore/?slice_id=12&standalone=true"
+    },
+    {
+      "id": 13,
+      "title": "Phân bổ theo vùng",
+      "url": "/explore/?slice_id=13&standalone=true"
+    }
+  ]
+}
