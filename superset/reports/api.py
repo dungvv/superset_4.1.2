@@ -24,7 +24,7 @@ from flask_appbuilder.models.sqla.interface import SQLAInterface
 from flask_babel import ngettext
 from marshmallow import ValidationError
 
-from superset import is_feature_enabled
+from superset import db, is_feature_enabled
 from superset.charts.filters import ChartFilter
 from superset.commands.report.create import CreateReportScheduleCommand
 from superset.commands.report.delete import DeleteReportScheduleCommand
@@ -43,7 +43,7 @@ from superset.databases.filters import DatabaseFilter
 from superset.exceptions import SupersetException
 from superset.extensions import event_logger
 from superset.reports.filters import ReportScheduleAllTextFilter, ReportScheduleFilter
-from superset.reports.models import ReportSchedule
+from superset.reports.models import ReportSchedule, ReportState
 from superset.reports.schemas import (
     get_delete_ids_schema,
     get_slack_channels_schema,
@@ -63,6 +63,54 @@ from superset.views.filters import BaseFilterRelatedUsers, FilterRelatedOwners
 logger = logging.getLogger(__name__)
 
 
+def _validate_filter_date_column(
+    report: ReportSchedule, filter_date: Optional[str]
+) -> Optional[str]:
+    """
+    Ensure filter_date is a real temporal column on the report datasource(s).
+
+    Returns an error message, or None when valid.
+    """
+    column_name = (filter_date or "").strip()
+    if not column_name:
+        return "filter_date is required"
+
+    datasources: list[Any] = []
+    if report.chart:
+        datasource = report.chart.datasource
+        if datasource is not None:
+            datasources.append(datasource)
+    elif report.dashboard:
+        datasources.extend(list(report.dashboard.datasources or []))
+    else:
+        return "Report has no chart or dashboard"
+
+    if not datasources:
+        return "Could not resolve datasource for filter_date validation"
+
+    matched_columns: list[Any] = []
+    target = column_name.casefold()
+    for datasource in datasources:
+        columns = getattr(datasource, "columns", None) or []
+        for column in columns:
+            name = getattr(column, "column_name", None) or ""
+            if name.casefold() == target:
+                matched_columns.append(column)
+
+    if not matched_columns:
+        return (
+            f"Column '{column_name}' was not found on the report datasource(s)"
+        )
+
+    if not any(bool(getattr(column, "is_dttm", False)) for column in matched_columns):
+        return (
+            f"Column '{column_name}' is not a date/temporal column "
+            f"(is_dttm must be true)"
+        )
+
+    return None
+
+
 class ReportScheduleRestApi(BaseSupersetModelRestApi):
     datamodel = SQLAInterface(ReportSchedule)
 
@@ -76,6 +124,7 @@ class ReportScheduleRestApi(BaseSupersetModelRestApi):
         RouteMethod.RELATED,
         "bulk_delete",
         "slack_channels",  # not using RouteMethod since locally defined
+        "execute",
     }
     class_permission_name = "ReportSchedule"
     method_permission_name = MODEL_API_RW_METHOD_PERMISSION_MAP
@@ -92,6 +141,7 @@ class ReportScheduleRestApi(BaseSupersetModelRestApi):
         "chart.id",
         "chart.slice_name",
         "chart.viz_type",
+        "chart.datasource_name",
         "context_markdown",
         "creation_method",
         "crontab",
@@ -128,6 +178,7 @@ class ReportScheduleRestApi(BaseSupersetModelRestApi):
     show_select_columns = show_columns + [
         "chart.datasource_id",
         "chart.datasource_type",
+        "chart.datasource_name",
     ]
     list_columns = [
         "active",
@@ -519,6 +570,178 @@ class ReportScheduleRestApi(BaseSupersetModelRestApi):
             return self.response_403()
         except ReportScheduleDeleteFailedError as ex:
             return self.response_422(message=str(ex))
+
+    @expose("/execute/", methods=("POST",))
+    @protect()
+    @safe
+    @statsd_metrics
+    @requires_json
+    @event_logger.log_this_with_context(
+        action=lambda self, *args, **kwargs: f"{self.__class__.__name__}.execute",
+        log_to_statsd=False,
+    )
+    def execute(self) -> Response:
+        """Queue one or more report schedules for immediate execution.
+        ---
+        post:
+          summary: Execute report schedules now
+          requestBody:
+            required: true
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    as_of_date:
+                      type: string
+                    items:
+                      type: array
+                      items:
+                        type: object
+          responses:
+            200:
+              description: Reports queued
+              content:
+                application/json:
+                  schema:
+                    type: object
+            400:
+              $ref: '#/components/responses/400'
+            401:
+              $ref: '#/components/responses/401'
+            403:
+              $ref: '#/components/responses/403'
+            500:
+              $ref: '#/components/responses/500'
+        """
+        from datetime import datetime
+        from uuid import uuid4
+
+        from flask import current_app
+
+        from superset.tasks.scheduler import execute as execute_task
+
+        payload = request.json or {}
+        items = payload.get("items") or []
+        as_of_date = payload.get("as_of_date")
+        if not items:
+            return self.response_400(message="items is required")
+
+        max_batch = int(
+            current_app.config.get("ALERT_REPORTS_SEND_NOW_MAX_BATCH", 10)
+        )
+        stagger_seconds = int(
+            current_app.config.get("ALERT_REPORTS_SEND_NOW_STAGGER_SECONDS", 15)
+        )
+        if len(items) > max_batch:
+            return self.response_400(
+                message=(
+                    f"Too many reports selected. "
+                    f"Maximum is {max_batch} per Send now request."
+                )
+            )
+
+        queued: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        errors: list[dict[str, Any]] = []
+
+        for index, item in enumerate(items):
+            report_id = item.get("id") if isinstance(item, dict) else item
+            filter_date = (
+                item.get("filter_date") if isinstance(item, dict) else None
+            )
+            try:
+                report_id = int(report_id)
+            except (TypeError, ValueError):
+                errors.append(
+                    {"id": report_id, "reason": "Invalid report id"}
+                )
+                continue
+
+            report = (
+                db.session.query(ReportSchedule)
+                .filter_by(id=report_id)
+                .one_or_none()
+            )
+            if not report:
+                errors.append({"id": report_id, "reason": "Not found"})
+                continue
+            if not report.active:
+                skipped.append({"id": report_id, "reason": "Inactive"})
+                continue
+            if report.last_state == ReportState.WORKING:
+                skipped.append({"id": report_id, "reason": "Already working"})
+                continue
+
+            filter_date_error = _validate_filter_date_column(report, filter_date)
+            if filter_date_error:
+                errors.append({"id": report_id, "reason": filter_date_error})
+                continue
+
+            try:
+                # Persist send-now context for auditing / future filter injection
+                extra = dict(report.extra or {})
+                extra["send_now"] = {
+                    "as_of_date": as_of_date,
+                    "filter_date": (
+                        filter_date.strip()
+                        if isinstance(filter_date, str)
+                        else filter_date
+                    ),
+                    "requested_at": datetime.utcnow().isoformat(),
+                }
+                report.extra = extra
+                report.force_screenshot = True
+                db.session.commit()
+
+                # Stagger via relative countdown (safer than absolute eta when
+                # worker clocks drift). scheduled_dttm fallback lives in
+                # tasks/scheduler.py because request.eta is None after countdown.
+                async_options: dict[str, Any] = {
+                    "countdown": index * stagger_seconds,
+                }
+                if (
+                    report.working_timeout is not None
+                    and current_app.config.get("ALERT_REPORTS_WORKING_TIME_OUT_KILL")
+                ):
+                    async_options["time_limit"] = (
+                        report.working_timeout
+                        + current_app.config["ALERT_REPORTS_WORKING_TIME_OUT_LAG"]
+                    )
+                    async_options["soft_time_limit"] = (
+                        report.working_timeout
+                        + current_app.config[
+                            "ALERT_REPORTS_WORKING_SOFT_TIME_OUT_LAG"
+                        ]
+                    )
+                # Only pass report_id. as_of_date/filter_date are already persisted
+                # on report.extra["send_now"] and read by the worker (avoids signature
+                # mismatch when an older reports.execute task is still registered).
+                task = execute_task.apply_async((report_id,), **async_options)
+                queued.append(
+                    {
+                        "id": report_id,
+                        "task_id": task.id or str(uuid4()),
+                        "name": report.name,
+                        "countdown": index * stagger_seconds,
+                    }
+                )
+            except Exception as ex:  # pylint: disable=broad-except
+                db.session.rollback()
+                logger.exception("Failed to queue report %s", report_id)
+                errors.append({"id": report_id, "reason": str(ex)})
+
+        return self.response(
+            200,
+            result={
+                "queued": queued,
+                "skipped": skipped,
+                "errors": errors,
+                "as_of_date": as_of_date,
+                "stagger_seconds": stagger_seconds,
+                "max_batch": max_batch,
+            },
+        )
 
     @expose("/slack_channels/", methods=("GET",))
     @protect()

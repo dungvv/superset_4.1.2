@@ -507,6 +507,59 @@ td.filtered {
   width: 100% !important;
 }
 
+/* Role / multi-select permissions: hide already-selected options from dropdown */
+.select2-results__option[aria-selected='true'],
+.select2-results__option--selected {
+  display: none !important;
+}
+
+/*
+  Select2 multi-select tag wrap: float + dynamic search-field width causes the next
+  chip to jump to the far right of the following line. Use flex wrap instead.
+*/
+.select2-container--default .select2-selection--multiple .select2-selection__rendered,
+.select2-container--bootstrap .select2-selection--multiple .select2-selection__rendered,
+.select2-container-multi .select2-choices {
+  display: flex !important;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  float: none !important;
+  padding: 4px 8px !important;
+  box-sizing: border-box;
+}
+
+.select2-container--default .select2-selection--multiple .select2-selection__choice,
+.select2-container--bootstrap .select2-selection--multiple .select2-selection__choice,
+.select2-container-multi .select2-choices .select2-search-choice {
+  float: none !important;
+  margin: 0 !important;
+}
+
+.select2-container--default .select2-selection--multiple .select2-search--inline,
+.select2-container--bootstrap .select2-selection--multiple .select2-search--inline,
+.select2-container-multi .select2-choices .select2-search-field {
+  float: none !important;
+  flex: 1 1 8em;
+  margin: 0 !important;
+  width: auto !important;
+  max-width: 100%;
+}
+
+.select2-container--default
+  .select2-selection--multiple
+  .select2-search--inline
+  .select2-search__field,
+.select2-container--bootstrap
+  .select2-selection--multiple
+  .select2-search--inline
+  .select2-search__field,
+.select2-container-multi .select2-choices .select2-search-field input {
+  width: 100% !important;
+  min-width: 8em !important;
+  margin-top: 0 !important;
+}
+
 /*
 Hides the logo while loading the page.
 Emotion styles will take care of the correct styling

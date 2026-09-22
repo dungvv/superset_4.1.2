@@ -628,11 +628,11 @@ const AlertReportModal: FunctionComponent<AlertReportModalProps> = ({
 
     notificationSettings.forEach(setting => {
       if (setting.method && setting.recipients.length) {
+        // BE 3.1.3 only accepts `target` on recipient_config_json
+        // (ccTarget/bccTarget cause "Unknown field" / [object Object] errors)
         recipients.push({
           recipient_config_json: {
             target: setting.recipients,
-            ccTarget: setting.cc,
-            bccTarget: setting.bcc,
           },
           type: setting.method,
         });
@@ -670,8 +670,51 @@ const AlertReportModal: FunctionComponent<AlertReportModalProps> = ({
       },
     };
 
+    // BE 3.1.3 report schema has no email_subject field
+    delete data.email_subject;
+
+    // Keep only fields accepted by unitel/superset:3.1.3 ReportSchedulePostSchema
+    const allowedReportFields = new Set([
+      'active',
+      'chart',
+      'context_markdown',
+      'creation_method',
+      'crontab',
+      'custom_width',
+      'dashboard',
+      'database',
+      'description',
+      'extra',
+      'force_screenshot',
+      'grace_period',
+      'log_retention',
+      'name',
+      'owners',
+      'recipients',
+      'report_format',
+      'sql',
+      'timezone',
+      'type',
+      'validator_config_json',
+      'validator_type',
+      'working_timeout',
+    ]);
+    Object.keys(data).forEach(key => {
+      if (!allowedReportFields.has(key)) {
+        delete data[key];
+      }
+    });
+
     if (data.recipients && !data.recipients.length) {
       delete data.recipients;
+    }
+
+    // Reports must not include database reference
+    if (isReport) {
+      delete data.database;
+      delete data.sql;
+      delete data.validator_type;
+      delete data.validator_config_json;
     }
 
     data.context_markdown = 'string';
