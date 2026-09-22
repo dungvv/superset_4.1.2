@@ -416,10 +416,12 @@ export const NotificationMethod: FunctionComponent<NotificationMethodProps> = ({
 
   if (!!cc && ccValue !== cc) {
     setCcValue(cc);
+    setCcVisible(true);
   }
 
   if (!!bcc && bccValue !== bcc) {
     setBccValue(bcc);
+    setBccVisible(true);
   }
 
   return (

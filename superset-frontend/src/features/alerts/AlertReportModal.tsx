@@ -628,11 +628,11 @@ const AlertReportModal: FunctionComponent<AlertReportModalProps> = ({
 
     notificationSettings.forEach(setting => {
       if (setting.method && setting.recipients.length) {
-        // BE 3.1.3 only accepts `target` on recipient_config_json
-        // (ccTarget/bccTarget cause "Unknown field" / [object Object] errors)
         recipients.push({
           recipient_config_json: {
             target: setting.recipients,
+            ...(setting.cc ? { ccTarget: setting.cc } : {}),
+            ...(setting.bcc ? { bccTarget: setting.bcc } : {}),
           },
           type: setting.method,
         });

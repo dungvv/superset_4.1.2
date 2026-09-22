@@ -28,6 +28,8 @@
   FAB Role edit/add (Permissions multi-select):
   1) Hide already-selected options from the Select2 search dropdown.
   2) Fix awkward tag wrapping caused by Select2's floated search field width.
+  3) Keep selected permission tags in the order the user picked them
+     (Select2 otherwise reorders by <option> / id).
 #}
 <style id="superset-role-permissions-select-fix">
   .select2-results__option[aria-selected="true"],
@@ -74,6 +76,13 @@
 </style>
 <script>
   (function () {
+    var PERM_SELECT_SELECTOR =
+      'select[name="permissions"], #permissions, select#permissions';
+
+    function isRolePermissionsPage() {
+      return /\/roles\/(add|edit)/.test(window.location.pathname || '');
+    }
+
     function resetSelect2SearchWidth(root) {
       var scope = root || document;
       var fields = scope.querySelectorAll(
@@ -82,6 +91,27 @@
       for (var i = 0; i < fields.length; i += 1) {
         fields[i].style.width = '100%';
       }
+    }
+
+    /**
+     * Move the newly selected <option> to the end of the <select> so Select2
+     * renders tags in pick order instead of option/id order.
+     */
+    function preserveSelectionOrder($select, selectedOption) {
+      if (!$select || !selectedOption) {
+        return;
+      }
+      var $option = window.jQuery(selectedOption);
+      if (!$option.length) {
+        return;
+      }
+      $option.detach();
+      $select.append($option);
+      // Refresh Select2 choices without re-entering select2:select
+      $select.trigger('change.select2');
+      resetSelect2SearchWidth(
+        ($select.next('.select2-container')[0]) || document
+      );
     }
 
     function bindSelect2Fixes() {
@@ -96,12 +126,24 @@
         .on(
           'select2:select.supersetRolePermSelect select2:unselect.supersetRolePermSelect select2:open.supersetRolePermSelect change.supersetRolePermSelect',
           '.my_select2, select.select2-offscreen, .select2-hidden-accessible',
-          function () {
-            var $container = $(this).next('.select2-container');
+          function (evt) {
+            var $el = $(this);
+            var $container = $el.next('.select2-container');
             if ($container.length) {
               resetSelect2SearchWidth($container[0]);
             } else {
               resetSelect2SearchWidth();
+            }
+
+            if (
+              evt.type === 'select2:select' &&
+              isRolePermissionsPage() &&
+              $el.is(PERM_SELECT_SELECTOR) &&
+              evt.params &&
+              evt.params.data &&
+              evt.params.data.element
+            ) {
+              preserveSelectionOrder($el, evt.params.data.element);
             }
           }
         );
