@@ -45,6 +45,7 @@ import { getDatasourceAsSaveableDataset } from 'src/utils/datasourceUtils';
 import {
   userHasPermission,
   isUserAdmin,
+  isUserAlpha,
 } from 'src/dashboard/util/permissionUtils';
 import ModalTrigger from 'src/components/ModalTrigger';
 import ViewQueryModalFooter from 'src/explore/components/controls/ViewQueryModalFooter';
@@ -289,8 +290,11 @@ class DatasourceControl extends PureComponent {
 
     const { user } = this.props;
     const allowEdit =
-      datasource.owners?.map(o => o.id || o.value).includes(user.userId) ||
-      isUserAdmin(user);
+      datasource.owners?.some(
+        o => Number(o.id || o.value) === Number(user.userId),
+      ) ||
+      isUserAdmin(user) ||
+      isUserAlpha(user);
 
     const canAccessSqlLab = userHasPermission(user, 'SQL Lab', 'menu_access');
 

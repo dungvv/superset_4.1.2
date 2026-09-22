@@ -75,23 +75,37 @@ def scheduler() -> None:
 
 
 @celery_app.task(name="reports.execute", bind=True)
-def execute(self: Celery.task, report_schedule_id: int) -> None:
+def execute(
+    self: Celery.task,
+    report_schedule_id: int,
+    as_of_date: str | None = None,
+    filter_date: str | None = None,
+) -> None:
     stats_logger: BaseStatsLogger = app.config["STATS_LOGGER"]
     stats_logger.incr("reports.execute")
 
     task_id = None
     try:
         task_id = execute.request.id
-        scheduled_dttm = execute.request.eta
+        # Send-now uses countdown (relative); Celery then leaves request.eta=None.
+        # report_execution_log.scheduled_dttm is NOT NULL — always provide a value.
+        scheduled_dttm = execute.request.eta or datetime.utcnow()
+        if isinstance(scheduled_dttm, str):
+            scheduled_dttm = datetime.fromisoformat(scheduled_dttm)
         logger.info(
-            "Executing alert/report, task id: %s, scheduled_dttm: %s",
+            "Executing alert/report, task id: %s, scheduled_dttm: %s, "
+            "as_of_date: %s, filter_date: %s",
             task_id,
             scheduled_dttm,
+            as_of_date,
+            filter_date,
         )
         AsyncExecuteReportScheduleCommand(
             task_id,
             report_schedule_id,
             scheduled_dttm,
+            as_of_date=as_of_date,
+            filter_date=filter_date,
         ).run()
     except ReportScheduleUnexpectedError:
         logger.exception(

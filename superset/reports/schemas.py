@@ -60,6 +60,26 @@ get_slack_channels_schema = {
         "exact_match": {"type": "boolean"},
     },
 }
+report_execute_schema = {
+    "type": "object",
+    "properties": {
+        "as_of_date": {"type": "string"},
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "integer"},
+                    "name": {"type": "string"},
+                    "filter_date": {"type": "string"},
+                },
+                "required": ["id"],
+            },
+            "minItems": 1,
+        },
+    },
+    "required": ["items"],
+}
 
 type_description = "The report schedule type"
 name_description = "The report schedule name."

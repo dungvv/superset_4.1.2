@@ -68,6 +68,7 @@ import { useSelector } from 'react-redux';
 import { UserWithPermissionsAndRoles } from 'src/types/bootstrapTypes';
 import NumberInput from './components/NumberInput';
 import { AlertReportCronScheduler } from './components/AlertReportCronScheduler';
+import DependencyCheck from './components/DependencyCheck';
 import { NotificationMethod } from './components/NotificationMethod';
 import ValidatedPanelHeader from './components/ValidatedPanelHeader';
 import StyledPanel from './components/StyledPanel';
@@ -362,6 +363,7 @@ export const TRANSLATIONS = {
   REPORT_CONTENTS_TITLE: t('Report contents'),
   SCHEDULE_TITLE: t('Schedule'),
   NOTIFICATION_TITLE: t('Notification method'),
+  DEPENDENCY_CHECK_TITLE: t('Dependency-Check'),
   // Error text
   NAME_ERROR_TEXT: t('name'),
   OWNERS_ERROR_TEXT: t('owners'),
@@ -431,6 +433,9 @@ const AlertReportModal: FunctionComponent<AlertReportModalProps> = ({
   );
   const [sendAsZip, setSendAsZip] = useState<boolean | undefined>(undefined);
   const [forceScreenshot, setForceScreenshot] = useState<boolean>(false);
+  const [dependencyCheckEnabled, setDependencyCheckEnabled] =
+    useState<boolean>(false);
+  const [dependencyTables, setDependencyTables] = useState<string>('');
 
   const [isScreenshot, setIsScreenshot] = useState<boolean>(false);
   useEffect(() => {
@@ -613,6 +618,8 @@ const AlertReportModal: FunctionComponent<AlertReportModalProps> = ({
     setNotificationSettings([]);
     setCurrentAlert({ ...defaultAlert });
     setNotificationAddState('active');
+    setDependencyCheckEnabled(false);
+    setDependencyTables('');
   };
 
   const onSave = () => {
@@ -621,11 +628,11 @@ const AlertReportModal: FunctionComponent<AlertReportModalProps> = ({
 
     notificationSettings.forEach(setting => {
       if (setting.method && setting.recipients.length) {
+        // BE 3.1.3 only accepts `target` on recipient_config_json
+        // (ccTarget/bccTarget cause "Unknown field" / [object Object] errors)
         recipients.push({
           recipient_config_json: {
             target: setting.recipients,
-            ccTarget: setting.cc,
-            bccTarget: setting.bcc,
           },
           type: setting.method,
         });
@@ -656,11 +663,58 @@ const AlertReportModal: FunctionComponent<AlertReportModalProps> = ({
           ? JSON.parse(currentAlert.extra)
           : currentAlert?.extra || {}),
         send_as_zip: sendAsZip !== undefined ? sendAsZip : true,
+        dependency_check: {
+          enabled: dependencyCheckEnabled,
+          tables: dependencyCheckEnabled ? dependencyTables : '',
+        },
       },
     };
 
+    // BE 3.1.3 report schema has no email_subject field
+    delete data.email_subject;
+
+    // Keep only fields accepted by unitel/superset:3.1.3 ReportSchedulePostSchema
+    const allowedReportFields = new Set([
+      'active',
+      'chart',
+      'context_markdown',
+      'creation_method',
+      'crontab',
+      'custom_width',
+      'dashboard',
+      'database',
+      'description',
+      'extra',
+      'force_screenshot',
+      'grace_period',
+      'log_retention',
+      'name',
+      'owners',
+      'recipients',
+      'report_format',
+      'sql',
+      'timezone',
+      'type',
+      'validator_config_json',
+      'validator_type',
+      'working_timeout',
+    ]);
+    Object.keys(data).forEach(key => {
+      if (!allowedReportFields.has(key)) {
+        delete data[key];
+      }
+    });
+
     if (data.recipients && !data.recipients.length) {
       delete data.recipients;
+    }
+
+    // Reports must not include database reference
+    if (isReport) {
+      delete data.database;
+      delete data.sql;
+      delete data.validator_type;
+      delete data.validator_config_json;
     }
 
     data.context_markdown = 'string';
@@ -1186,6 +1240,8 @@ const AlertReportModal: FunctionComponent<AlertReportModalProps> = ({
         },
       ]);
       setNotificationAddState('active');
+      setDependencyCheckEnabled(false);
+      setDependencyTables('');
     }
   }, [alert]);
 
@@ -1229,8 +1285,12 @@ const AlertReportModal: FunctionComponent<AlertReportModalProps> = ({
       if (resource.extra) {
         const extra = typeof resource.extra === 'string' ? JSON.parse(resource.extra) : resource.extra;
         setSendAsZip(extra.send_as_zip);
+        setDependencyCheckEnabled(!!extra.dependency_check?.enabled);
+        setDependencyTables(extra.dependency_check?.tables || '');
       } else {
         setSendAsZip(undefined);
+        setDependencyCheckEnabled(false);
+        setDependencyTables('');
       }
 
       setCurrentAlert({
@@ -1837,6 +1897,26 @@ const AlertReportModal: FunctionComponent<AlertReportModalProps> = ({
               />
             )
           }
+        </StyledPanel>
+        <StyledPanel
+          header={
+            <ValidatedPanelHeader
+              title={TRANSLATIONS.DEPENDENCY_CHECK_TITLE}
+              subtitle={t(
+                'Optionally check sync status of dependent tables before sending.',
+              )}
+              validateCheckStatus
+              testId="dependency-check-panel"
+            />
+          }
+          key="dependency-check"
+        >
+          <DependencyCheck
+            enabled={dependencyCheckEnabled}
+            tables={dependencyTables}
+            onEnabledChange={setDependencyCheckEnabled}
+            onTablesChange={setDependencyTables}
+          />
         </StyledPanel>
       </Collapse>
     </StyledModal>

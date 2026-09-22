@@ -451,8 +451,12 @@ class SupersetSecurityManager(  # pylint: disable=too-many-public-methods
         """
         Return True if the user can access all the datasources, False otherwise.
 
-        :returns: Whether the user can access all the datasources
+        Alpha is treated as a content editor with access to every dataset
+        (without granting system Admin menus).
         """
+        is_alpha = getattr(self, "is_alpha", None)
+        if callable(is_alpha) and is_alpha():
+            return True
 
         return self.can_access_all_databases() or self.can_access(
             "all_datasource_access", "all_datasource_access"
@@ -464,6 +468,9 @@ class SupersetSecurityManager(  # pylint: disable=too-many-public-methods
 
         :returns: Whether the user can access all the databases
         """
+        is_alpha = getattr(self, "is_alpha", None)
+        if callable(is_alpha) and is_alpha():
+            return True
         return self.can_access("all_database_access", "all_database_access")
 
     def can_access_database(self, database: "Database") -> bool:
@@ -2307,10 +2314,19 @@ class SupersetSecurityManager(  # pylint: disable=too-many-public-methods
                         .one_or_none()
                     )
                     and (
-                        (is_feature_enabled("DASHBOARD_RBAC") and dashboard_.roles)
+                        (
+                            is_feature_enabled("DASHBOARD_RBAC")
+                            and (
+                                dashboard_.roles
+                                or self.can_view_all_published_dashboards()
+                            )
+                        )
                         or (
                             is_feature_enabled("EMBEDDED_SUPERSET")
                             and self.is_guest_user()
+                        )
+                        or (
+                            self.can_view_all_dashboards()
                         )
                     )
                     and (
@@ -2361,6 +2377,24 @@ class SupersetSecurityManager(  # pylint: disable=too-many-public-methods
                 )
 
             if self.is_admin() or self.is_owner(dashboard):
+                return
+
+            # Alpha / Gamma: view every dashboard
+            can_view_all = False
+            viewer_fn = getattr(self, "can_view_all_dashboards", None)
+            if callable(viewer_fn):
+                try:
+                    can_view_all = bool(viewer_fn())
+                except Exception:
+                    can_view_all = False
+            if not can_view_all:
+                role_names = {
+                    (r.name or "").strip().lower()
+                    for r in self.get_user_roles()
+                    if r is not None
+                }
+                can_view_all = bool(role_names & {"alpha", "gamma"})
+            if can_view_all:
                 return
 
             # TODO: Once a better sharing flow is in place, we should move the
@@ -2673,32 +2707,97 @@ class SupersetSecurityManager(  # pylint: disable=too-many-public-methods
                 return True
         return False
 
+    def is_admin(self) -> bool:
+        """
+        Returns True if the current user is an admin user, False otherwise.
+
+        :returns: Whether the current user is an admin user
+        """
+
+        return current_app.config["AUTH_ROLE_ADMIN"] in [
+            role.name for role in self.get_user_roles()
+        ]
+
+    def _user_has_role_name(self, role_name: str) -> bool:
+        target = (role_name or "").lower()
+        return any(role.name.lower() == target for role in self.get_user_roles())
+
+    def is_alpha(self) -> bool:
+        """
+        Content editors: full edit of dashboards/charts/datasets, not system admin.
+        """
+        return self._user_has_role_name("Alpha")
+
+    def is_gamma(self) -> bool:
+        """
+        Global viewers: can view all dashboards (read-only).
+        """
+        return self._user_has_role_name("Gamma")
+
+    def can_view_all_dashboards(self) -> bool:
+        """Admin, Alpha and Gamma may list/open every dashboard."""
+        return self.is_admin() or self.is_alpha() or self.is_gamma()
+
+    def can_view_all_published_dashboards(self) -> bool:
+        """Backward-compatible alias. """
+        return self.can_view_all_dashboards()
+
+    def _user_owns_any_dashboard_for_chart(self, chart: "Slice") -> bool:
+        if getattr(g, "user", None) is None or g.user.is_anonymous:
+            return False
+        dashboards = getattr(chart, "dashboards", None) or []
+        return any(g.user in (dashboard.owners or []) for dashboard in dashboards)
+
+    def _user_owns_any_dashboard_for_dataset(self, dataset: "BaseDatasource") -> bool:
+        slices = getattr(dataset, "slices", None) or []
+        for slc in slices:
+            if self._user_owns_any_dashboard_for_chart(slc):
+                return True
+        return False
+
     def raise_for_ownership(self, resource: Model) -> None:
         """
         Raise an exception if the user does not own the resource.
 
-        Note admins are deemed owners of all resources.
+        Admins and Alpha may alter any content resource.
+        Dashboard owners may alter charts/datasets used on their dashboards.
 
         :param resource: The dashboard, dataset, chart, etc. resource
         :raises SupersetSecurityException: If the current user is not an owner
         """
+        # Avoid circular imports at module load
+        from superset.connectors.sqla.models import SqlaTable
+        from superset.models.slice import Slice
 
-        if self.is_admin():
+        if self.is_admin() or self.is_alpha():
             return
+
         orig_resource = self.get_session.query(resource.__class__).get(resource.id)
         owners = orig_resource.owners if hasattr(orig_resource, "owners") else []
 
-        if g.user.is_anonymous or g.user not in owners:
-            raise SupersetSecurityException(
-                SupersetError(
-                    error_type=SupersetErrorType.MISSING_OWNERSHIP_ERROR,
-                    message=_(
-                        "You don't have the rights to alter %(resource)s",
-                        resource=resource,
-                    ),
-                    level=ErrorLevel.ERROR,
-                )
+        if not g.user.is_anonymous and g.user in owners:
+            return
+
+        # Dashboard owner => edit charts/datasets belonging to that dashboard
+        if isinstance(orig_resource, Slice) and self._user_owns_any_dashboard_for_chart(
+            orig_resource
+        ):
+            return
+        if isinstance(
+            orig_resource, SqlaTable
+        ) and self._user_owns_any_dashboard_for_dataset(orig_resource):
+            return
+
+        raise SupersetSecurityException(
+            SupersetError(
+                error_type=SupersetErrorType.MISSING_OWNERSHIP_ERROR,
+                message=_(
+                    "You don't have the rights to alter %(resource)s",
+                    resource=resource,
+                ),
+                level=ErrorLevel.ERROR,
             )
+        )
 
     def is_owner(self, resource: Model) -> bool:
         """
@@ -2714,14 +2813,3 @@ class SupersetSecurityManager(  # pylint: disable=too-many-public-methods
             return False
 
         return True
-
-    def is_admin(self) -> bool:
-        """
-        Returns True if the current user is an admin user, False otherwise.
-
-        :returns: Whether the current user is an admin user
-        """
-
-        return current_app.config["AUTH_ROLE_ADMIN"] in [
-            role.name for role in self.get_user_roles()
-        ]

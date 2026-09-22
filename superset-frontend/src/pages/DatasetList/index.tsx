@@ -52,7 +52,7 @@ import CertifiedBadge from 'src/components/CertifiedBadge';
 import InfoTooltip from 'src/components/InfoTooltip';
 import ImportModelsModal from 'src/components/ImportModal/index';
 import WarningIconWithTooltip from 'src/components/WarningIconWithTooltip';
-import { isUserAdmin } from 'src/dashboard/util/permissionUtils';
+import { isUserAdmin, isUserAlpha } from 'src/dashboard/util/permissionUtils';
 import { GenericLink } from 'src/components/GenericLink/GenericLink';
 
 import {
@@ -408,10 +408,12 @@ const DatasetList: FunctionComponent<DatasetListProps> = ({
       },
       {
         Cell: ({ row: { original } }: any) => {
-          // Verify owner or isAdmin
           const allowEdit =
-            original.owners.map((o: Owner) => o.id).includes(user.userId) ||
-            isUserAdmin(user);
+            original.owners.some(
+              (o: Owner) => Number(o.id) === Number(user.userId),
+            ) ||
+            isUserAdmin(user) ||
+            isUserAlpha(user);
 
           const handleEdit = () => openDatasetEditModal(original);
           const handleDelete = () => openDatasetDeleteModal(original);

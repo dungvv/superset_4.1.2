@@ -117,6 +117,64 @@ class DashboardAccessFilter(BaseFilter):  # pylint: disable=too-few-public-metho
         if security_manager.is_admin():
             return query
 
+        # Alpha / Gamma (and Admin): see every dashboard, ignore Roles whitelist.
+        # Inline role-name check so this works even if helper methods are missing
+        # on an older security manager build.
+        try:
+            role_names = {
+                (r.name or "").strip().lower()
+                for r in security_manager.get_user_roles()
+                if r is not None
+            }
+        except Exception:
+            role_names = set()
+
+        # Also include roles loaded on g.user (DB relationship) — some auth
+        # paths leave session roles incomplete while ab_user_role is correct.
+        try:
+            from flask import g as flask_g
+
+            user_obj = getattr(flask_g, "user", None)
+            if user_obj is not None:
+                for r in getattr(user_obj, "roles", []) or []:
+                    if r is not None and getattr(r, "name", None):
+                        role_names.add(r.name.strip().lower())
+        except Exception:
+            pass
+
+        can_view_all = False
+        viewer_fn = getattr(security_manager, "can_view_all_dashboards", None)
+        if callable(viewer_fn):
+            try:
+                can_view_all = bool(viewer_fn())
+            except Exception:
+                can_view_all = False
+        if not can_view_all:
+            can_view_all = bool(
+                role_names & {"alpha", "gamma", "grp_alpha", "grp_gamma"}
+            ) or any("gamma" in n for n in role_names)
+        if not can_view_all:
+            # Match Gamma / Alpha role objects by id even if name casing differs
+            for label in ("Gamma", "Alpha"):
+                role = security_manager.find_role(label)
+                if role and any(
+                    r is not None and r.id == role.id
+                    for r in security_manager.get_user_roles()
+                ):
+                    can_view_all = True
+                    break
+
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "DashboardAccessFilter can_view_all=%s role_names=%s",
+            can_view_all,
+            sorted(role_names),
+        )
+
+        if can_view_all:
+            return query
+
         is_rbac_disabled_filter = []
         dashboard_has_roles = Dashboard.roles.any()
         if is_feature_enabled("DASHBOARD_RBAC"):

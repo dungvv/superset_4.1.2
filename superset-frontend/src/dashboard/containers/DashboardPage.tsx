@@ -69,6 +69,11 @@ const DashboardBuilder = lazy(
 
 const originalDocumentTitle = document.title;
 
+/** Full page reload interval for specific kiosk-style dashboards only. */
+const DASHBOARD_IDS_WITH_PERIODIC_PAGE_RELOAD = new Set<number>([231]);
+const PERIODIC_PAGE_RELOAD_MS = 15 * 60 * 1000;
+const PERIODIC_PAGE_RELOAD_CHECK_MS = 60 * 1000;
+
 type PageProps = {
   idOrSlug: string;
 };
@@ -81,6 +86,9 @@ export const DashboardPage: FC<PageProps> = ({ idOrSlug }: PageProps) => {
   const hasDashboardInfoInitiated = useSelector<RootState, Boolean>(
     ({ dashboardInfo }) =>
       dashboardInfo && Object.keys(dashboardInfo).length > 0,
+  );
+  const editMode = useSelector<RootState, boolean>(
+    ({ dashboardState }) => dashboardState.editMode,
   );
   const { addDangerToast } = useToasts();
   const { result: dashboard, error: dashboardApiError } =
@@ -204,33 +212,39 @@ export const DashboardPage: FC<PageProps> = ({ idOrSlug }: PageProps) => {
   }, [addDangerToast, datasets, datasetsApiError, dispatch]);
 
   useEffect(() => {
-    const AUTO_REFRESH_INTERVAL_MS = 15 * 60 * 1000;
-    const CHECK_INTERVAL_MS = 60 * 1000;
+    if (
+      !id ||
+      !DASHBOARD_IDS_WITH_PERIODIC_PAGE_RELOAD.has(id) ||
+      editMode
+    ) {
+      return undefined;
+    }
+
     let lastReloadTime = Date.now();
 
     const checkAndReload = () => {
-      if (Date.now() - lastReloadTime >= AUTO_REFRESH_INTERVAL_MS) {
+      if (Date.now() - lastReloadTime >= PERIODIC_PAGE_RELOAD_MS) {
         window.location.reload();
       }
     };
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        if (Date.now() - lastReloadTime >= AUTO_REFRESH_INTERVAL_MS) {
+        if (Date.now() - lastReloadTime >= PERIODIC_PAGE_RELOAD_MS) {
           window.location.reload();
         }
         lastReloadTime = Date.now();
       }
     };
 
-    const timer = setInterval(checkAndReload, CHECK_INTERVAL_MS);
+    const timer = setInterval(checkAndReload, PERIODIC_PAGE_RELOAD_CHECK_MS);
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       clearInterval(timer);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, []);
+  }, [id, editMode]);
 
   if (error) throw error; // caught in error boundary
   if (!readyToRender || !hasDashboardInfoInitiated) return <Loading />;

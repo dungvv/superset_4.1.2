@@ -25,9 +25,8 @@ import {
 import { Dashboard } from 'src/types/Dashboard';
 import { findPermission } from 'src/utils/findPermission';
 
-// this should really be a config value,
-// but is hardcoded in backend logic already, so...
 const ADMIN_ROLE_NAME = 'admin';
+const ALPHA_ROLE_NAME = 'alpha';
 
 export const isUserAdmin = (
   user?: UserWithPermissionsAndRoles | UndefinedUser,
@@ -37,6 +36,14 @@ export const isUserAdmin = (
     role => role.toLowerCase() === ADMIN_ROLE_NAME,
   );
 
+export const isUserAlpha = (
+  user?: UserWithPermissionsAndRoles | UndefinedUser,
+) =>
+  isUserWithPermissionsAndRoles(user) &&
+  Object.keys(user.roles || {}).some(
+    role => role.toLowerCase() === ALPHA_ROLE_NAME,
+  );
+
 const isUserDashboardOwner = (
   dashboard: Dashboard,
   user: UserWithPermissionsAndRoles | UndefinedUser,
@@ -44,13 +51,20 @@ const isUserDashboardOwner = (
   isUserWithPermissionsAndRoles(user) &&
   dashboard.owners.some(owner => owner.id === user.userId);
 
+/**
+ * Edit dashboard (layout / filters / metadata):
+ * Admin, Alpha, or dashboard Owner (with can_write).
+ * Gamma and custom viewer roles cannot edit.
+ */
 export const canUserEditDashboard = (
   dashboard: Dashboard,
   user?: UserWithPermissionsAndRoles | UndefinedUser | null,
 ) =>
   isUserWithPermissionsAndRoles(user) &&
-  (isUserAdmin(user) || isUserDashboardOwner(dashboard, user)) &&
-  findPermission('can_write', 'Dashboard', user?.roles);
+  findPermission('can_write', 'Dashboard', user?.roles) &&
+  (isUserAdmin(user) ||
+    isUserAlpha(user) ||
+    isUserDashboardOwner(dashboard, user));
 
 export function userHasPermission(
   user: UserWithPermissionsAndRoles | UndefinedUser,
@@ -74,14 +88,14 @@ export function canUserOverwriteChart(
   slice?: {
     owners?: unknown;
     is_managed_externally?: boolean;
-    is_managed_externally?: boolean;
+    dashboards?: { owners?: { id?: number }[] }[];
   } | null,
   user?: UserWithPermissionsAndRoles | UndefinedUser | null,
 ): boolean {
-  if (!slice || slice.is_managed_externally || slice.is_managed_externally) {
+  if (!slice || slice.is_managed_externally) {
     return false;
   }
-  if (isUserAdmin(user ?? undefined)) {
+  if (isUserAdmin(user ?? undefined) || isUserAlpha(user ?? undefined)) {
     return true;
   }
   if (!isUserWithPermissionsAndRoles(user) || user.userId == null) {
@@ -92,7 +106,7 @@ export function canUserOverwriteChart(
     return false;
   }
   const owners = Array.isArray(slice.owners) ? slice.owners : [];
-  return owners.some(owner => {
+  const isChartOwner = owners.some(owner => {
     if (owner == null) {
       return false;
     }
@@ -104,6 +118,14 @@ export function canUserOverwriteChart(
     }
     return Number(owner) === userId;
   });
+  if (isChartOwner) {
+    return true;
+  }
+  // Dashboard owner of any dashboard that contains this chart
+  const dashboards = Array.isArray(slice.dashboards) ? slice.dashboards : [];
+  return dashboards.some(dash =>
+    (dash?.owners || []).some(owner => Number(owner?.id) === userId),
+  );
 }
 
 export const canUserSaveAsDashboard = (
@@ -112,6 +134,7 @@ export const canUserSaveAsDashboard = (
 ) =>
   isUserWithPermissionsAndRoles(user) &&
   findPermission('can_write', 'Dashboard', user?.roles) &&
-  (!isFeatureEnabled(FeatureFlag.DashboardRbac) ||
-    isUserAdmin(user) ||
+  (isUserAdmin(user) ||
+    isUserAlpha(user) ||
+    !isFeatureEnabled(FeatureFlag.DashboardRbac) ||
     isUserDashboardOwner(dashboard, user));

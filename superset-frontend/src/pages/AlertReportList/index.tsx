@@ -52,6 +52,9 @@ import { createErrorHandler, createFetchRelated } from 'src/views/CRUD/utils';
 import { isUserAdmin } from 'src/dashboard/util/permissionUtils';
 import Owner from 'src/types/Owner';
 import AlertReportModal from 'src/features/alerts/AlertReportModal';
+import SendNowModal, {
+  SendNowPayload,
+} from 'src/features/alerts/components/SendNowModal';
 import { AlertObject, AlertState } from 'src/features/alerts/types';
 import { ModifiedInfo } from 'src/components/AuditInfo';
 import { QueryObjectColumns } from 'src/views/CRUD/types';
@@ -156,6 +159,8 @@ function AlertList({
   );
   const [currentAlertDeleting, setCurrentAlertDeleting] =
     useState<AlertObject | null>(null);
+  const [sendNowModalOpen, setSendNowModalOpen] = useState(false);
+  const [reportsToSend, setReportsToSend] = useState<AlertObject[]>([]);
 
   // Actions
   function handleAlertEdit(alert: AlertObject | null) {
@@ -205,6 +210,72 @@ function AlertList({
             titlePlural,
             errMsg,
           ),
+        ),
+      )(e);
+    }
+  };
+
+  const handleBulkSendNow = (alertsToSend: AlertObject[]) => {
+    setReportsToSend(alertsToSend);
+    setSendNowModalOpen(true);
+  };
+
+  const handleSendNowSubmit = async (payload: SendNowPayload) => {
+    try {
+      const { json } = await SupersetClient.post({
+        endpoint: '/api/v1/report/execute/',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const result = json?.result || {};
+      const queuedItems = result.queued || [];
+      const skippedItems = result.skipped || [];
+      const errorItems = result.errors || [];
+      const queued = queuedItems.length || 0;
+      const skipped = skippedItems.length || 0;
+      const errors = errorItems.length || 0;
+      // Keep modal open when nothing was queued (e.g. invalid filter_date)
+      if (queued) {
+        setSendNowModalOpen(false);
+        setReportsToSend([]);
+      }
+      if (queued) {
+        addSuccessToast(
+          t(
+            'Queued %s %s to send for %s',
+            queued,
+            titlePlural,
+            payload.as_of_date,
+          ),
+        );
+      }
+      if (skipped) {
+        const reasons = skippedItems
+          .map(
+            (item: { id?: number; reason?: string }) =>
+              `#${item.id}: ${item.reason || t('Skipped')}`,
+          )
+          .join('; ');
+        addDangerToast(
+          t('Skipped %s %s: %s', skipped, titlePlural, reasons),
+        );
+      }
+      if (errors) {
+        const reasons = errorItems
+          .map(
+            (item: { id?: number; reason?: string }) =>
+              `#${item.id}: ${item.reason || t('Failed')}`,
+          )
+          .join('; ');
+        addDangerToast(
+          t('Failed to queue %s %s: %s', errors, titlePlural, reasons),
+        );
+      }
+      refreshData();
+    } catch (e) {
+      createErrorHandler(errMsg =>
+        addDangerToast(
+          t('There was an issue sending the selected %s: %s', titlePlural, errMsg),
         ),
       )(e);
     }
@@ -579,6 +650,15 @@ function AlertList({
           title={t('Delete %s?', title)}
         />
       )}
+      <SendNowModal
+        show={sendNowModalOpen}
+        reports={reportsToSend}
+        onHide={() => {
+          setSendNowModalOpen(false);
+          setReportsToSend([]);
+        }}
+        onSend={handleSendNowSubmit}
+      />
       <ConfirmStatusChange
         title={t('Please confirm')}
         description={t(
@@ -590,6 +670,12 @@ function AlertList({
         {confirmDelete => {
           const bulkActions: ListViewProps['bulkActions'] = canDelete
             ? [
+                {
+                  key: 'send_now',
+                  name: t('Send now'),
+                  onSelect: handleBulkSendNow,
+                  type: 'primary',
+                },
                 {
                   key: 'delete',
                   name: t('Delete'),
