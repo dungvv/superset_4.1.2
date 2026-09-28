@@ -1454,6 +1454,10 @@ ALERT_REPORTS_MAX_CUSTOM_SCREENSHOT_WIDTH = 2400
 ALERT_MINIMUM_INTERVAL = int(timedelta(minutes=0).total_seconds())
 REPORT_MINIMUM_INTERVAL = int(timedelta(minutes=0).total_seconds())
 
+# Max reports / stagger for Send now bulk execute
+ALERT_REPORTS_SEND_NOW_MAX_BATCH = 10
+ALERT_REPORTS_SEND_NOW_STAGGER_SECONDS = 15
+
 # A custom prefix to use on all Alerts & Reports emails
 EMAIL_REPORTS_SUBJECT_PREFIX = "[Report] "
 
