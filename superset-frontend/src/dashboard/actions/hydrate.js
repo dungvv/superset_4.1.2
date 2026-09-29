@@ -57,7 +57,7 @@ import { FilterBarOrientation } from '../types';
 export const HYDRATE_DASHBOARD = 'HYDRATE_DASHBOARD';
 
 export const hydrateDashboard =
-  ({ history, dashboard, charts, dataMask, activeTabs }) =>
+  ({ history, dashboard, charts, dataMask, activeTabs, directPathToChild: restoredPath }) =>
   (dispatch, getState) => {
     const { user, common, dashboardState } = getState();
     const { metadata, position_data: positionData } = dashboard;
@@ -220,7 +220,7 @@ export const hydrateDashboard =
 
     // find direct link component and path from root
     const directLinkComponentId = focusedChartLayoutId || getLocationHash();
-    let directPathToChild = dashboardState.directPathToChild || [];
+    let directPathToChild = restoredPath || dashboardState.directPathToChild || [];
     if (layout[directLinkComponentId]) {
       directPathToChild = (layout[directLinkComponentId].parents || []).slice();
       directPathToChild.push(directLinkComponentId);

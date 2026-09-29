@@ -806,6 +806,13 @@ STORE_CACHE_KEYS_IN_METADATA_DB = False
 ENABLE_CORS = False
 CORS_OPTIONS: dict[Any, Any] = {}
 
+# Comma-separated dashboard IDs whose tabs should load charts on page open.
+DASHBOARDS_WITH_EAGER_TAB_LOADING = [
+    int(value.strip())
+    for value in os.environ.get("DASHBOARDS_WITH_EAGER_TAB_LOADING", "").split(",")
+    if value.strip().isdigit()
+]
+
 # Sanitizes the HTML content used in markdowns to allow its rendering in a safe manner.
 # Disabling this option is not recommended for security reasons. If you wish to allow
 # valid safe elements that are not included in the default sanitization schema, use the

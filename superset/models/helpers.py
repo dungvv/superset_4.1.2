@@ -1468,6 +1468,12 @@ class ExploreMixin:  # pylint: disable=too-many-public-methods
             "to_dttm": to_dttm.isoformat() if to_dttm else None,
             "table_columns": [col.column_name for col in self.columns],
             "filter": filter,
+            "current_start_date": extras.get("current_start_date"),
+            "current_end_date": extras.get("current_end_date"),
+            "comparison_start_date": extras.get("comparison_start_date"),
+            "comparison_end_date": extras.get("comparison_end_date"),
+            "comparison_time_range": extras.get("comparison_time_range"),
+            "time_group": extras.get("time_group"),
         }
         columns = columns or []
         groupby = groupby or []
@@ -1496,6 +1502,8 @@ class ExploreMixin:  # pylint: disable=too-many-public-methods
                 template_kwargs["comparison_start_date"] = parts[2]
                 template_kwargs["comparison_end_date"] = parts[3]
                 template_kwargs["time_group"] = parts[4]
+                if len(parts) >= 6:
+                    template_kwargs["time_grain"] = parts[5]
 
         extra_cache_keys: list[Any] = []
         template_kwargs["extra_cache_keys"] = extra_cache_keys

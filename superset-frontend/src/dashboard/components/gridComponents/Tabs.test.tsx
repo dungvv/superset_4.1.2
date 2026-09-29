@@ -18,6 +18,7 @@
  */
 
 import userEvent from '@testing-library/user-event';
+import { EagerTabLoadingContext } from 'src/dashboard/contexts/EagerTabLoadingContext';
 import { render, screen, waitFor } from 'spec/helpers/testing-library';
 import { nativeFiltersInfo } from 'src/dashboard/fixtures/mockNativeFilters';
 import DashboardComponent from 'src/dashboard/containers/DashboardComponent';
@@ -143,6 +144,29 @@ test('Should render editMode:false', () => {
   expect(
     screen.queryByRole('button', { name: 'Add tab' }),
   ).not.toBeInTheDocument();
+});
+
+test('mounts inactive tab content when eager loading is enabled', () => {
+  const props = createProps();
+  props.editMode = false;
+  render(
+    <EagerTabLoadingContext.Provider value>
+      <Tabs {...props} />
+    </EagerTabLoadingContext.Provider>,
+    { useRedux: true, useDnd: true },
+  );
+
+  const contentComponents = (DashboardComponent as unknown as jest.Mock).mock.calls
+    .map(([componentProps]) => componentProps)
+    .filter(
+      componentProps => componentProps.renderType === 'RENDER_TAB_CONTENT',
+    );
+  expect(contentComponents).toHaveLength(3);
+  expect(
+    contentComponents.filter(
+      componentProps => componentProps.isComponentVisible,
+    ),
+  ).toHaveLength(1);
 });
 
 test('Update component props', () => {

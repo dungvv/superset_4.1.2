@@ -18,7 +18,15 @@
  */
 // ParentSize uses resize observer so the dashboard will update size
 // when its container size changes, due to e.g., builder side panel opening
-import { FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  FC,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { shallowEqual, useDispatch, useSelector } from 'react-redux';
 import {
   Filters,
@@ -29,6 +37,7 @@ import { ParentSize } from '@visx/responsive';
 import { isEqual, pick } from 'lodash';
 import Tabs from 'src/components/Tabs';
 import DashboardGrid from 'src/dashboard/containers/DashboardGrid';
+import { EagerTabLoadingContext } from 'src/dashboard/contexts/EagerTabLoadingContext';
 import {
   DashboardInfo,
   DashboardLayout,
@@ -82,6 +91,7 @@ const useNativeFilterScopes = () => {
 };
 
 const DashboardContainer: FC<DashboardContainerProps> = ({ topLevelTabs }) => {
+  const eagerTabLoading = useContext(EagerTabLoadingContext);
   const nativeFilterScopes = useNativeFilterScopes();
   const dispatch = useDispatch();
   const prevFilterScopesRef = useRef<
@@ -289,6 +299,7 @@ const DashboardContainer: FC<DashboardContainerProps> = ({ topLevelTabs }) => {
               // This avoids expensive mounts/unmounts of the entire dashboard.
               <Tabs.TabPane
                 key={index === 0 ? DASHBOARD_GRID_ID : index.toString()}
+                forceRender={eagerTabLoading}
               >
                 <DashboardGrid
                   gridComponent={dashboardLayout[id]}

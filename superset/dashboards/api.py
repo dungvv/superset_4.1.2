@@ -1689,6 +1689,39 @@ class DashboardRestApi(BaseSupersetModelRestApi):
             },
         )
 
+    @expose("/periodic_reload_config/", methods=("GET",))
+    def periodic_reload_config(self) -> WerkzeugResponse:
+        """Get dashboard IDs that should have periodic page reload.
+        ---
+        get:
+          summary: Get periodic reload config
+          description: >-
+            Returns the list of dashboard IDs configured for periodic page reload
+            (for kiosk/video wall displays).
+          responses:
+            200:
+              description: Periodic reload config
+              content:
+                application/json:
+                  schema:
+                    type: object
+                    properties:
+                      dashboard_ids:
+                        type: array
+                        items:
+                          type: integer
+                        description: List of dashboard IDs
+        """
+        dashboard_ids = current_app.config.get("DASHBOARDS_WITH_PERIODIC_RELOAD", [])
+        eager_tab_dashboard_ids = current_app.config.get(
+            "DASHBOARDS_WITH_EAGER_TAB_LOADING", []
+        )
+        return self.response(
+            200,
+            dashboard_ids=dashboard_ids,
+            eager_tab_dashboard_ids=eager_tab_dashboard_ids,
+        )
+
     @expose("/<id_or_slug>/export_word/", methods=("POST",))
     @protect()
     @safe

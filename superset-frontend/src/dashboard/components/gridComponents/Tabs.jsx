@@ -35,6 +35,7 @@ import { componentShape } from '../../util/propShapes';
 import { NEW_TAB_ID } from '../../util/constants';
 import { RENDER_TAB, RENDER_TAB_CONTENT } from './Tab';
 import { TABS_TYPE, TAB_TYPE } from '../../util/componentTypes';
+import { EagerTabLoadingContext } from '../../contexts/EagerTabLoadingContext';
 
 const propTypes = {
   id: PropTypes.string.isRequired,
@@ -109,6 +110,8 @@ const StyledTabsContainer = styled.div`
 `;
 
 export class Tabs extends PureComponent {
+  static contextType = EagerTabLoadingContext;
+
   constructor(props) {
     super(props);
     const { tabIndex, activeKey } = this.getTabInfo(props);
@@ -373,6 +376,7 @@ export class Tabs extends PureComponent {
               {tabIds.map((tabId, tabIndex) => (
                 <LineEditableTabs.TabPane
                   key={tabId}
+                  forceRender={this.context}
                   tab={
                     <DashboardComponent
                       id={tabId}

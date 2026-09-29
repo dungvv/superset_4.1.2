@@ -16,7 +16,15 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { createContext, lazy, FC, useEffect, useMemo, useRef } from 'react';
+import {
+  createContext,
+  lazy,
+  FC,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { Global } from '@emotion/react';
 import { useHistory } from 'react-router-dom';
 import { t, useTheme } from '@superset-ui/core';
@@ -41,6 +49,11 @@ import {
   getPermalinkValue,
 } from 'src/dashboard/components/nativeFilters/FilterBar/keyValue';
 import DashboardContainer from 'src/dashboard/containers/Dashboard';
+import { EagerTabLoadingContext } from 'src/dashboard/contexts/EagerTabLoadingContext';
+import {
+  consumeTabsForReload,
+  saveTabsForReload,
+} from 'src/dashboard/util/restoreTabsOnReload';
 
 import { nanoid } from 'nanoid';
 import { RootState } from '../types';
@@ -70,9 +83,25 @@ const DashboardBuilder = lazy(
 const originalDocumentTitle = document.title;
 
 /** Full page reload interval for specific kiosk-style dashboards only. */
-const DASHBOARD_IDS_WITH_PERIODIC_PAGE_RELOAD = new Set<number>([231]);
 const PERIODIC_PAGE_RELOAD_MS = 15 * 60 * 1000;
 const PERIODIC_PAGE_RELOAD_CHECK_MS = 60 * 1000;
+
+type DashboardRuntimeConfig = {
+  dashboard_ids?: number[];
+  eager_tab_dashboard_ids?: number[];
+};
+const EMPTY_RUNTIME_CONFIG: DashboardRuntimeConfig = {};
+
+const fetchDashboardRuntimeConfig = async (): Promise<DashboardRuntimeConfig> => {
+  try {
+    const response = await fetch('/api/v1/dashboard/periodic_reload_config/');
+    if (!response.ok) return {};
+    const data = await response.json();
+    return data?.result || data;
+  } catch {
+    return {};
+  }
+};
 
 type PageProps = {
   idOrSlug: string;
@@ -90,6 +119,12 @@ export const DashboardPage: FC<PageProps> = ({ idOrSlug }: PageProps) => {
   const editMode = useSelector<RootState, boolean>(
     ({ dashboardState }) => dashboardState.editMode,
   );
+  const activeTabs = useSelector<RootState, string[]>(
+    ({ dashboardState }) => dashboardState.activeTabs,
+  );
+  const directPathToChild = useSelector<RootState, string[]>(
+    ({ dashboardState }) => dashboardState.directPathToChild,
+  );
   const { addDangerToast } = useToasts();
   const { result: dashboard, error: dashboardApiError } =
     useDashboard(idOrSlug);
@@ -101,10 +136,43 @@ export const DashboardPage: FC<PageProps> = ({ idOrSlug }: PageProps) => {
     status,
   } = useDashboardDatasets(idOrSlug);
   const isDashboardHydrated = useRef(false);
+  const [runtimeConfig, setRuntimeConfig] = useState<{
+    dashboardId: number;
+    config: DashboardRuntimeConfig;
+  }>({ dashboardId: 0, config: {} });
 
   const error = dashboardApiError || chartsApiError;
   const readyToRender = Boolean(dashboard && charts);
   const { dashboard_title, css, id = 0 } = dashboard || {};
+
+  useEffect(() => {
+    let active = true;
+    if (id) {
+      fetchDashboardRuntimeConfig().then(config => {
+        if (active) setRuntimeConfig({ dashboardId: id, config });
+      });
+    }
+    return () => {
+      active = false;
+    };
+  }, [id]);
+
+  const currentConfig =
+    runtimeConfig.dashboardId === id
+      ? runtimeConfig.config
+      : EMPTY_RUNTIME_CONFIG;
+  const eagerTabLoading =
+    !editMode && currentConfig.eager_tab_dashboard_ids?.includes(id) === true;
+
+  const tabsRef = useRef({ activeTabs, directPathToChild });
+  tabsRef.current = { activeTabs, directPathToChild };
+
+  useEffect(() => {
+    if (!id) return undefined;
+    const handleBeforeUnload = () => saveTabsForReload(id, tabsRef.current);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [id]);
 
   useEffect(() => {
     // mark tab id as redundant when user closes browser tab - a new id will be
@@ -162,6 +230,16 @@ export const DashboardPage: FC<PageProps> = ({ idOrSlug }: PageProps) => {
       }
 
       if (readyToRender) {
+        const savedTabs = consumeTabsForReload(
+          id,
+          dashboard?.position_data || {},
+        );
+        const hasExplicitSelection = Boolean(
+          permalinkKey || getUrlParam(URL_PARAMS.dashboardFocusedChart) || window.location.hash,
+        );
+        if (!hasExplicitSelection && savedTabs) {
+          ({ activeTabs } = savedTabs);
+        }
         if (!isDashboardHydrated.current) {
           isDashboardHydrated.current = true;
         }
@@ -171,6 +249,9 @@ export const DashboardPage: FC<PageProps> = ({ idOrSlug }: PageProps) => {
             dashboard,
             charts,
             activeTabs,
+            directPathToChild: hasExplicitSelection
+              ? undefined
+              : savedTabs?.directPathToChild,
             dataMask,
           }),
         );
@@ -212,15 +293,15 @@ export const DashboardPage: FC<PageProps> = ({ idOrSlug }: PageProps) => {
   }, [addDangerToast, datasets, datasetsApiError, dispatch]);
 
   useEffect(() => {
-    if (
-      !id ||
-      !DASHBOARD_IDS_WITH_PERIODIC_PAGE_RELOAD.has(id) ||
-      editMode
-    ) {
+    if (!id || editMode) {
       return undefined;
     }
 
-    let lastReloadTime = Date.now();
+    if (!currentConfig.dashboard_ids?.includes(id)) {
+      return undefined;
+    }
+
+    const lastReloadTime = Date.now();
 
     const checkAndReload = () => {
       if (Date.now() - lastReloadTime >= PERIODIC_PAGE_RELOAD_MS) {
@@ -230,10 +311,7 @@ export const DashboardPage: FC<PageProps> = ({ idOrSlug }: PageProps) => {
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        if (Date.now() - lastReloadTime >= PERIODIC_PAGE_RELOAD_MS) {
-          window.location.reload();
-        }
-        lastReloadTime = Date.now();
+        checkAndReload();
       }
     };
 
@@ -244,7 +322,7 @@ export const DashboardPage: FC<PageProps> = ({ idOrSlug }: PageProps) => {
       clearInterval(timer);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [id, editMode]);
+  }, [id, editMode, currentConfig]);
 
   if (error) throw error; // caught in error boundary
   if (!readyToRender || !hasDashboardInfoInitiated) return <Loading />;
@@ -262,9 +340,11 @@ export const DashboardPage: FC<PageProps> = ({ idOrSlug }: PageProps) => {
       />
       <SyncDashboardState dashboardPageId={dashboardPageId} />
       <DashboardPageIdContext.Provider value={dashboardPageId}>
-        <DashboardContainer>
-          <DashboardBuilder />
-        </DashboardContainer>
+        <EagerTabLoadingContext.Provider value={eagerTabLoading}>
+          <DashboardContainer>
+            <DashboardBuilder />
+          </DashboardContainer>
+        </EagerTabLoadingContext.Provider>
       </DashboardPageIdContext.Provider>
     </>
   );
