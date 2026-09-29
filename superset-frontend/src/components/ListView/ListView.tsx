@@ -136,6 +136,18 @@ const bulkSelectColumnConfig = {
   size: 'sm',
 };
 
+// Header checkbox scoped to the loaded page, so selections kept on other
+// pages don't make it look checked/indeterminate.
+const pageScopedBulkSelectColumnConfig = {
+  ...bulkSelectColumnConfig,
+  Header: ({ getToggleAllPageRowsSelectedProps }: any) => (
+    <IndeterminateCheckbox
+      {...getToggleAllPageRowsSelectedProps()}
+      id="header-toggle-all"
+    />
+  ),
+};
+
 const ViewModeContainer = styled.div`
   padding-right: ${({ theme }) => theme.gridUnit * 4}px;
   margin-top: ${({ theme }) => theme.gridUnit * 5 + 1}px;
@@ -233,6 +245,9 @@ export interface ListViewProps<T extends object = any> {
   columnsForWrapText?: string[];
   enableBulkTag?: boolean;
   bulkTagResourceName?: string;
+  persistSelectionAcrossPages?: boolean;
+  // Clears the bulk selection whenever this value changes.
+  selectionResetKey?: unknown;
 }
 
 function ListView<T extends object = any>({
@@ -261,6 +276,8 @@ function ListView<T extends object = any>({
   bulkTagResourceName,
   addSuccessToast,
   addDangerToast,
+  persistSelectionAcrossPages = false,
+  selectionResetKey,
 }: ListViewProps<T>) {
   const {
     getTableProps,
@@ -273,12 +290,15 @@ function ListView<T extends object = any>({
     applyFilterValue,
     setSortBy,
     selectedFlatRows,
-    toggleAllRowsSelected,
+    clearSelection,
     setViewMode,
     state: { pageIndex, pageSize, internalFilters, sortBy, viewMode },
     query,
   } = useListViewState({
-    bulkSelectColumnConfig,
+    bulkSelectColumnConfig: persistSelectionAcrossPages
+      ? pageScopedBulkSelectColumnConfig
+      : bulkSelectColumnConfig,
+    persistSelectionAcrossPages,
     bulkSelectMode: bulkSelectEnabled && Boolean(bulkActions.length),
     columns,
     count,
@@ -319,8 +339,12 @@ function ListView<T extends object = any>({
 
   useEffect(() => {
     // discard selections if bulk select is disabled
-    if (!bulkSelectEnabled) toggleAllRowsSelected(false);
-  }, [bulkSelectEnabled, toggleAllRowsSelected]);
+    if (!bulkSelectEnabled) clearSelection();
+  }, [bulkSelectEnabled, clearSelection]);
+
+  useEffect(() => {
+    if (selectionResetKey !== undefined) clearSelection();
+  }, [selectionResetKey, clearSelection]);
 
   useEffect(() => {
     if (!loading && pageIndex > pageCount - 1 && pageCount > 0) {
@@ -384,7 +408,7 @@ function ListView<T extends object = any>({
                         role="button"
                         tabIndex={0}
                         className="deselect-all"
-                        onClick={() => toggleAllRowsSelected(false)}
+                        onClick={clearSelection}
                       >
                         {t('Deselect all')}
                       </span>

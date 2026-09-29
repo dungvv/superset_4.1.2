@@ -16,8 +16,16 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { useEffect, useMemo, useState, ReactNode } from 'react';
 import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  ReactNode,
+} from 'react';
+import {
+  actions as tableActions,
   useFilters,
   usePagination,
   useRowSelect,
@@ -192,7 +200,13 @@ interface UseListViewConfig {
   };
   renderCard?: boolean;
   defaultViewMode?: ViewModeType;
+  // Rows must have a unique `id`; selections are keyed by it and kept when
+  // the page, sort or filters change.
+  persistSelectionAcrossPages?: boolean;
 }
+
+const getRowIdFromData = (row: any, index: number) =>
+  row?.id !== undefined && row?.id !== null ? String(row.id) : String(index);
 
 export function useListViewState({
   fetchData,
@@ -206,6 +220,7 @@ export function useListViewState({
   bulkSelectColumnConfig,
   renderCard = false,
   defaultViewMode = 'card',
+  persistSelectionAcrossPages = false,
 }: UseListViewConfig) {
   const [query, setQuery] = useQueryParams({
     filters: RisonParam,
@@ -257,9 +272,10 @@ export function useListViewState({
     gotoPage,
     setAllFilters,
     setSortBy,
-    selectedFlatRows,
+    selectedFlatRows: pageSelectedFlatRows,
     toggleAllRowsSelected,
-    state: { pageIndex, pageSize, sortBy, filters },
+    dispatch,
+    state: { pageIndex, pageSize, sortBy, filters, selectedRowIds },
   } = useTable(
     {
       columns: columnsWithSelect,
@@ -273,6 +289,9 @@ export function useListViewState({
       manualSortBy: true,
       autoResetFilters: false,
       pageCount: Math.ceil(count / initialPageSize),
+      ...(persistSelectionAcrossPages
+        ? { autoResetSelectedRows: false, getRowId: getRowIdFromData }
+        : {}),
     },
     useFilters,
     useSortBy,
@@ -280,6 +299,39 @@ export function useListViewState({
     useRowState,
     useRowSelect,
   );
+
+  // react-table only returns selected rows of the loaded page, so remember the
+  // original objects of rows selected on other pages.
+  const selectedOriginalsRef = useRef(new Map<string, any>());
+  const selectedFlatRows = useMemo(() => {
+    if (!persistSelectionAcrossPages) {
+      return pageSelectedFlatRows;
+    }
+    const cache = selectedOriginalsRef.current;
+    rows.forEach(row => {
+      if (selectedRowIds[row.id]) {
+        cache.set(row.id, row.original);
+      } else {
+        cache.delete(row.id);
+      }
+    });
+    Array.from(cache.keys()).forEach(id => {
+      if (!selectedRowIds[id]) {
+        cache.delete(id);
+      }
+    });
+    return Object.keys(selectedRowIds)
+      .filter(id => cache.has(id))
+      .map(id => ({ id, original: cache.get(id) }));
+  }, [persistSelectionAcrossPages, pageSelectedFlatRows, rows, selectedRowIds]);
+
+  const clearSelection = useCallback(() => {
+    if (persistSelectionAcrossPages) {
+      dispatch({ type: tableActions.resetSelectedRows });
+    } else {
+      toggleAllRowsSelected(false);
+    }
+  }, [persistSelectionAcrossPages, dispatch, toggleAllRowsSelected]);
 
   const [internalFilters, setInternalFilters] = useState<InternalFilter[]>(
     query.filters && initialFilters.length
@@ -377,6 +429,7 @@ export function useListViewState({
     setSortBy,
     state: { pageIndex, pageSize, sortBy, filters, internalFilters, viewMode },
     toggleAllRowsSelected,
+    clearSelection,
     applyFilterValue,
     setViewMode,
     query,

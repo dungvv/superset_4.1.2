@@ -161,6 +161,7 @@ function AlertList({
     useState<AlertObject | null>(null);
   const [sendNowModalOpen, setSendNowModalOpen] = useState(false);
   const [reportsToSend, setReportsToSend] = useState<AlertObject[]>([]);
+  const [selectionResetKey, setSelectionResetKey] = useState(0);
 
   // Actions
   function handleAlertEdit(alert: AlertObject | null) {
@@ -200,6 +201,7 @@ function AlertList({
       const { message } = await deleteAlerts(
         alertsToDelete.map(({ id }) => id),
       );
+      setSelectionResetKey(key => key + 1);
       refreshData();
       addSuccessToast(message);
     } catch (e) {
@@ -698,6 +700,8 @@ function AlertList({
               bulkActions={bulkActions}
               bulkSelectEnabled={bulkSelectEnabled}
               disableBulkSelect={toggleBulkSelect}
+              persistSelectionAcrossPages
+              selectionResetKey={selectionResetKey}
               refreshData={refreshData}
               addDangerToast={addDangerToast}
               addSuccessToast={addSuccessToast}

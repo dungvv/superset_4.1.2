@@ -20,6 +20,7 @@ from typing import Any
 
 from flask import request, Response
 from flask_appbuilder.api import expose, protect, rison, safe
+from flask_appbuilder.models.sqla.filters import FilterContains
 from flask_appbuilder.models.sqla.interface import SQLAInterface
 from flask_babel import ngettext
 from marshmallow import ValidationError
@@ -136,6 +137,12 @@ class RLSRestApi(BaseSupersetModelRestApi):
     allowed_rel_fields = {"tables", "roles", "created_by", "changed_by"}
     related_field_filters = {
         "changed_by": RelatedFieldFilter("first_name", FilterRelatedOwners),
+        "tables": RelatedFieldFilter("table_name", FilterContains),
+        "roles": RelatedFieldFilter("name", FilterContains),
+    }
+    order_rel_fields = {
+        "tables": ("table_name", "asc"),
+        "roles": ("name", "asc"),
     }
     base_related_field_filters = {
         "tables": [["id", DatasourceFilter, lambda: []]],
