@@ -25,10 +25,10 @@
 #}
 
 {#
-  FAB Role edit/add (Permissions multi-select):
+  FAB Role edit/add (Permissions + Dashboards multi-select):
   1) Hide already-selected options from the Select2 search dropdown.
   2) Fix awkward tag wrapping caused by Select2's floated search field width.
-  3) Keep selected permission tags in the order the user picked them
+  3) Keep selected permission/dashboard tags in the order the user picked them
      (Select2 otherwise reorders by <option> / id).
 #}
 <style id="superset-role-permissions-select-fix">
@@ -76,10 +76,11 @@
 </style>
 <script>
   (function () {
-    var PERM_SELECT_SELECTOR =
-      'select[name="permissions"], #permissions, select#permissions';
+    var ORDERED_SELECT_SELECTOR =
+      'select[name="permissions"], #permissions, select#permissions, ' +
+      'select[name="dashboards"], #dashboards, select#dashboards';
 
-    function isRolePermissionsPage() {
+    function isRoleFormPage() {
       return /\/roles\/(add|edit)/.test(window.location.pathname || '');
     }
 
@@ -137,8 +138,8 @@
 
             if (
               evt.type === 'select2:select' &&
-              isRolePermissionsPage() &&
-              $el.is(PERM_SELECT_SELECTOR) &&
+              isRoleFormPage() &&
+              $el.is(ORDERED_SELECT_SELECTOR) &&
               evt.params &&
               evt.params.data &&
               evt.params.data.element
