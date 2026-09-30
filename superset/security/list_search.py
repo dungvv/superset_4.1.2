@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from flask import has_request_context, request
+from flask import has_request_context, request, url_for
 from flask_appbuilder.models.filters import BaseFilter
 from flask_appbuilder.security.views import UserDBModelView
 from flask_babel import lazy_gettext
@@ -28,6 +28,7 @@ from sqlalchemy import or_
 
 KEYWORD_ARG = "q"
 KEYWORD_LIST_TEMPLATE = "superset/fab_overrides/keyword_list.html"
+USER_EDIT_TEMPLATE = "superset/fab_overrides/user_edit.html"
 
 
 def _like_pattern(keyword: str) -> str:
@@ -67,7 +68,10 @@ class KeywordSearchFilter(BaseFilter):
 
 
 class UnitelUserDBModelView(UserDBModelView):
-    """FAB List Users with a search box on first name, last name, username."""
+    """
+    FAB List Users with a search box on first name, last name, username, and
+    a "Reset Password" button on the edit page (stock FAB reset password form).
+    """
 
     # Keep the stock FAB permission name so existing grants still apply.
     class_permission_name = "UserDBModelView"
@@ -80,3 +84,20 @@ class UnitelUserDBModelView(UserDBModelView):
     base_filters = [
         ["username", KeywordSearchFilter, ("first_name", "last_name", "username")]
     ]
+
+    edit_template = USER_EDIT_TEMPLATE
+
+    def _reset_password_url(self) -> str | None:
+        pk = (request.view_args or {}).get("pk")
+        reset_view = getattr(self.appbuilder.sm, "resetpasswordview", None)
+        if pk is None or reset_view is None:
+            return None
+        endpoint = reset_view.__name__
+        if not self.appbuilder.sm.has_access("can_this_form_get", endpoint):
+            return None
+        return url_for(f"{endpoint}.this_form_get", pk=pk)
+
+    def render_template(self, template: str, **kwargs: Any) -> Any:
+        if template == self.edit_template:
+            kwargs["reset_password_url"] = self._reset_password_url()
+        return super().render_template(template, **kwargs)
