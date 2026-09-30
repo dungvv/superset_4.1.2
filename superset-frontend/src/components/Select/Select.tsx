@@ -370,6 +370,11 @@ const Select = forwardRef(
     const handleOnSearchInput = (search: string) => {
       searchTextRef.current = search;
       handleOnSearch(search);
+      // the typed option must exist before Enter, otherwise Enter picks
+      // the first matching predefined option
+      if (allowNewOptions) {
+        handleOnSearch.flush();
+      }
     };
 
     // rc-select clears its own search text on select but does not fire onSearch
