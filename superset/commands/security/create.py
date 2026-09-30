@@ -21,6 +21,7 @@ from typing import Any
 
 from superset.commands.base import BaseCommand
 from superset.commands.exceptions import DatasourceNotFoundValidationError
+from superset.commands.security.rls_clause import validate_clause_columns
 from superset.commands.utils import populate_roles
 from superset.connectors.sqla.models import SqlaTable
 from superset.daos.security import RLSDAO
@@ -48,5 +49,6 @@ class CreateRLSRuleCommand(BaseCommand):
         )
         if len(tables) != len(self._tables):
             raise DatasourceNotFoundValidationError()
+        validate_clause_columns(self._properties.get("clause"), tables)
         self._properties["roles"] = roles
         self._properties["tables"] = tables

@@ -32,7 +32,10 @@ from superset.commands.exceptions import (
 )
 from superset.commands.security.create import CreateRLSRuleCommand
 from superset.commands.security.delete import DeleteRLSRuleCommand
-from superset.commands.security.exceptions import RLSRuleNotFoundError
+from superset.commands.security.exceptions import (
+    RLSClauseValidationError,
+    RLSRuleNotFoundError,
+)
 from superset.commands.security.update import UpdateRLSRuleCommand
 from superset.connectors.sqla.models import RowLevelSecurityFilter
 from superset.constants import MODEL_API_RW_METHOD_PERMISSION_MAP, RouteMethod
@@ -205,6 +208,8 @@ class RLSRestApi(BaseSupersetModelRestApi):
         try:
             new_model = CreateRLSRuleCommand(item).run()
             return self.response(201, id=new_model.id, result=item)
+        except RLSClauseValidationError as ex:
+            return self.response_422(message=str(ex))
         except RolesNotFoundValidationError as ex:
             logger.error(
                 "Role not found while creating RLS rule %s: %s",
@@ -291,6 +296,8 @@ class RLSRestApi(BaseSupersetModelRestApi):
         try:
             new_model = UpdateRLSRuleCommand(pk, item).run()
             return self.response(201, id=new_model.id, result=item)
+        except RLSClauseValidationError as ex:
+            return self.response_422(message=str(ex))
         except RolesNotFoundValidationError as ex:
             logger.error(
                 "Role not found while updating RLS rule %s: %s",

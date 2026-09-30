@@ -16,6 +16,7 @@
 # under the License.
 
 from flask_babel import lazy_gettext as _
+from marshmallow import ValidationError
 
 from superset.commands.exceptions import CommandException, DeleteFailedError
 
@@ -27,3 +28,10 @@ class RLSRuleNotFoundError(CommandException):
 
 class RuleDeleteFailedError(DeleteFailedError):
     message = _("RLS rules could not be deleted.")
+
+
+class RLSClauseValidationError(ValidationError):
+    status = 422
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, field_name="clause")

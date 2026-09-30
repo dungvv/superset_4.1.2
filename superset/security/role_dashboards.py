@@ -33,6 +33,8 @@ from flask_appbuilder.urltools import (
 from flask_babel import lazy_gettext
 from wtforms import SelectMultipleField
 
+from superset.security.list_search import KEYWORD_LIST_TEMPLATE, KeywordSearchFilter
+
 logger = logging.getLogger(__name__)
 
 
@@ -154,6 +156,13 @@ class UnitelRoleModelView(RoleModelView):
     # Keep the same FAB permission name as stock RoleModelView so existing
     # Admin / role grants (can_list/can_edit/... on RoleModelView) still work.
     class_permission_name = "RoleModelView"
+
+    list_template = KEYWORD_LIST_TEMPLATE
+    extra_args = {
+        "keyword_label": lazy_gettext("Name"),
+        "keyword_placeholder": lazy_gettext("Type a value"),
+    }
+    base_filters = [["name", KeywordSearchFilter, ("name",)]]
 
     list_columns = ["name"]
     add_columns = ["name", "permissions", "dashboards"]

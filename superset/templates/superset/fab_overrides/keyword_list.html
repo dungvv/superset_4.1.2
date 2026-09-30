@@ -1,0 +1,138 @@
+{#
+  Licensed to the Apache Software Foundation (ASF) under one
+  or more contributor license agreements.  See the NOTICE file
+  distributed with this work for additional information
+  regarding copyright ownership.  The ASF licenses this file
+  to you under the Apache License, Version 2.0 (the
+  "License"); you may not use this file except in compliance
+  with the License.  You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing,
+  software distributed under the License is distributed on an
+  "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+  KIND, either express or implied.  See the License for the
+  specific language governing permissions and limitations
+  under the License.
+#}
+{% extends "appbuilder/general/model/list.html" %}
+
+{% block list_search scoped %}
+    {% import "superset/macros.html" as macros %}
+    {% set keyword = request.args.get('q', '') %}
+    {# Mirrors the "search" filter of the React ListView (Alerts & Reports). #}
+    <style nonce="{{ macros.get_nonce() }}">
+        .keyword-filter {
+            display: inline-block;
+            width: 200px;
+            margin-bottom: 16px;
+        }
+        .keyword-filter label {
+            display: block;
+            text-transform: uppercase;
+            font-size: 12px;
+            font-weight: normal;
+            color: #666666;
+            margin-bottom: 4px;
+        }
+        .keyword-filter .keyword-input {
+            position: relative;
+        }
+        .keyword-filter .keyword-input input {
+            width: 100%;
+            height: 32px;
+            padding: 4px 28px 4px 32px;
+            font-size: 14px;
+            border: 1px solid #d9d9d9;
+            border-radius: 4px;
+            outline: none;
+            transition: border-color 0.3s, box-shadow 0.3s;
+        }
+        .keyword-filter .keyword-input input:hover {
+            border-color: #20a7c9;
+        }
+        .keyword-filter .keyword-input input:focus {
+            border-color: #20a7c9;
+            box-shadow: 0 0 0 2px rgba(32, 167, 201, 0.2);
+        }
+        .keyword-filter .keyword-input input::placeholder {
+            color: #bfbfbf;
+        }
+        .keyword-filter .keyword-icon {
+            position: absolute;
+            left: 11px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #b2b2b2;
+            pointer-events: none;
+        }
+        .keyword-filter .keyword-clear {
+            position: absolute;
+            right: 9px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #bfbfbf;
+            cursor: pointer;
+            display: none;
+        }
+        .keyword-filter .keyword-clear:hover {
+            color: #8c8c8c;
+        }
+        .keyword-filter .keyword-input.has-value .keyword-clear {
+            display: block;
+        }
+    </style>
+    <form id="keyword-filter-form" class="keyword-filter" method="get" action="{{ request.path }}">
+        <label for="keyword-filter-input">{{ keyword_label }}</label>
+        <div class="keyword-input{% if keyword %} has-value{% endif %}">
+            <i class="fa fa-search keyword-icon" aria-hidden="true"></i>
+            <input id="keyword-filter-input" type="text" name="q" value="{{ keyword }}"
+                   placeholder="{{ keyword_placeholder }}" autocomplete="off">
+            <i class="fa fa-times-circle keyword-clear" role="button" aria-label="{{ _('Clear') }}"></i>
+        </div>
+    </form>
+    <script nonce="{{ macros.get_nonce() }}">
+        (function () {
+            var form = document.getElementById('keyword-filter-form');
+            var input = document.getElementById('keyword-filter-input');
+            var wrapper = input.parentNode;
+            var clearIcon = wrapper.querySelector('.keyword-clear');
+            var applied = input.value.trim();
+
+            function submit(value) {
+                if (value === applied) {
+                    return;
+                }
+                applied = value;
+                window.location.href = value
+                    ? form.action + '?q=' + encodeURIComponent(value)
+                    : form.action;
+            }
+
+            form.addEventListener('submit', function (event) {
+                event.preventDefault();
+                submit(input.value.trim());
+            });
+            input.addEventListener('blur', function () {
+                var value = input.value.trim();
+                if (value) {
+                    submit(value);
+                }
+            });
+            input.addEventListener('input', function () {
+                wrapper.classList.toggle('has-value', input.value !== '');
+                if (input.value === '') {
+                    submit('');
+                }
+            });
+            clearIcon.addEventListener('mousedown', function (event) {
+                event.preventDefault();
+                input.value = '';
+                wrapper.classList.remove('has-value');
+                submit('');
+            });
+        })();
+    </script>
+    {{ super() }}
+{% endblock %}
