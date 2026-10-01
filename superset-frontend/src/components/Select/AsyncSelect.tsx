@@ -44,6 +44,7 @@ import { FAST_DEBOUNCE, SLOW_DEBOUNCE } from 'src/constants';
 import {
   getValue,
   hasOption,
+  removeSelectedOptions,
   isLabeledValue,
   renderSelectOptions,
   hasCustomLabels,
@@ -112,7 +113,7 @@ const AsyncSelect = forwardRef(
       allowClear,
       allowNewOptions = false,
       ariaLabel,
-      autoClearSearchValue = false,
+      autoClearSearchValue = true,
       fetchOnlyOnSearch,
       filterOption = true,
       header = null,
@@ -150,6 +151,7 @@ const AsyncSelect = forwardRef(
     const isSingleMode = mode === 'single';
     const [selectValue, setSelectValue] = useState(value);
     const [inputValue, setInputValue] = useState('');
+    const searchTextRef = useRef('');
     const [isLoading, setIsLoading] = useState(loading);
     const [error, setError] = useState('');
     const [isDropdownVisible, setIsDropdownVisible] = useState(false);
@@ -407,8 +409,33 @@ const AsyncSelect = forwardRef(
       }
     };
 
+    const handleOnSearchInput = (search: string) => {
+      searchTextRef.current = search;
+      handleOnSearch(search);
+    };
+
+    // rc-select clears its own search text on select but does not fire onSearch
+    const handleOnSelectAndClearSearch: SelectProps['onSelect'] = (
+      selectedItem,
+      option,
+    ) => {
+      handleOnSelect(selectedItem, option);
+      if (!isSingleMode && autoClearSearchValue && searchTextRef.current) {
+        searchTextRef.current = '';
+        handleOnSearch('');
+      }
+    };
+
     const handleFilterOption = (search: string, option: AntdLabeledValue) =>
       handleFilterOptionHelper(search, option, optionFilterProps, filterOption);
+
+    const dropdownOptions = useMemo(
+      () =>
+        isSingleMode
+          ? fullSelectOptions
+          : removeSelectedOptions(fullSelectOptions, selectValue),
+      [isSingleMode, fullSelectOptions, selectValue],
+    );
 
     const handleOnDropdownVisibleChange = (isDropdownVisible: boolean) => {
       setIsDropdownVisible(isDropdownVisible);
@@ -464,6 +491,7 @@ const AsyncSelect = forwardRef(
     };
 
     const handleOnBlur = (event: FocusEvent<HTMLElement>) => {
+      searchTextRef.current = '';
       setInputValue('');
       onBlur?.(event);
     };
@@ -617,10 +645,10 @@ const AsyncSelect = forwardRef(
           // @ts-ignore
           onPaste={onPaste}
           onPopupScroll={handlePagination}
-          onSearch={showSearch ? handleOnSearch : undefined}
-          onSelect={handleOnSelect}
+          onSearch={showSearch ? handleOnSearchInput : undefined}
+          onSelect={handleOnSelectAndClearSearch}
           onClear={handleClear}
-          options={shouldRenderChildrenOptions ? undefined : fullSelectOptions}
+          options={shouldRenderChildrenOptions ? undefined : dropdownOptions}
           placeholder={placeholder}
           showSearch={showSearch}
           showArrow
@@ -640,7 +668,7 @@ const AsyncSelect = forwardRef(
           ref={ref}
         >
           {hasCustomLabels(fullSelectOptions) &&
-            renderSelectOptions(fullSelectOptions)}
+            renderSelectOptions(dropdownOptions)}
         </StyledSelect>
       </StyledContainer>
     );

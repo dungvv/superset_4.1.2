@@ -23,6 +23,7 @@ import {
   RefObject,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useCallback,
   ClipboardEvent,
@@ -41,6 +42,7 @@ import { FAST_DEBOUNCE } from 'src/constants';
 import {
   getValue,
   hasOption,
+  removeSelectedOptions,
   isLabeledValue,
   renderSelectOptions,
   sortSelectedFirstHelper,
@@ -57,7 +59,12 @@ import {
   isObject,
   isEqual as utilsIsEqual,
 } from './utils';
-import { RawValue, SelectOptionsType, SelectProps } from './types';
+import {
+  CustomTagProps,
+  RawValue,
+  SelectOptionsType,
+  SelectProps,
+} from './types';
 import {
   StyledCheckOutlined,
   StyledContainer,
@@ -92,7 +99,7 @@ const Select = forwardRef(
       allowNewOptions = false,
       allowSelectAll = true,
       ariaLabel,
-      autoClearSearchValue = false,
+      autoClearSearchValue = true,
       filterOption = true,
       header = null,
       headerPosition = 'top',
@@ -128,6 +135,7 @@ const Select = forwardRef(
     const shouldShowSearch = allowNewOptions ? true : showSearch;
     const [selectValue, setSelectValue] = useState(value);
     const [inputValue, setInputValue] = useState('');
+    const searchTextRef = useRef('');
     const [isLoading, setIsLoading] = useState(loading);
     const [isDropdownVisible, setIsDropdownVisible] = useState(false);
     const [maxTagCount, setMaxTagCount] = useState(
@@ -359,8 +367,38 @@ const Select = forwardRef(
 
     useEffect(() => () => handleOnSearch.cancel(), [handleOnSearch]);
 
+    const handleOnSearchInput = (search: string) => {
+      searchTextRef.current = search;
+      handleOnSearch(search);
+      // the typed option must exist before Enter, otherwise Enter picks
+      // the first matching predefined option
+      if (allowNewOptions) {
+        handleOnSearch.flush();
+      }
+    };
+
+    // rc-select clears its own search text on select but does not fire onSearch
+    const handleOnSelectAndClearSearch: SelectProps['onSelect'] = (
+      selectedItem,
+      option,
+    ) => {
+      handleOnSelect(selectedItem, option);
+      if (!isSingleMode && autoClearSearchValue && searchTextRef.current) {
+        searchTextRef.current = '';
+        handleOnSearch('');
+      }
+    };
+
     const handleFilterOption = (search: string, option: AntdLabeledValue) =>
       handleFilterOptionHelper(search, option, optionFilterProps, filterOption);
+
+    const dropdownOptions = useMemo(
+      () =>
+        isSingleMode
+          ? fullSelectOptions
+          : removeSelectedOptions(fullSelectOptions, selectValue),
+      [isSingleMode, fullSelectOptions, selectValue],
+    );
 
     const handleOnDropdownVisibleChange = (isDropdownVisible: boolean) => {
       setIsDropdownVisible(isDropdownVisible);
@@ -455,6 +493,7 @@ const Select = forwardRef(
     );
 
     const handleOnBlur = (event: FocusEvent<HTMLElement>) => {
+      searchTextRef.current = '';
       setInputValue('');
       onBlur?.(event);
     };
@@ -530,6 +569,27 @@ const Select = forwardRef(
     const shouldRenderChildrenOptions = useMemo(
       () => selectAllEnabled || hasCustomLabels(options),
       [selectAllEnabled, options],
+    );
+
+    // Selected options are removed from the dropdown, so rc-select can no
+    // longer resolve their labels when values are raw (labelInValue=false).
+    const tagRender = useCallback(
+      (tagProps: any) => {
+        if (labelInValue || tagProps.label !== tagProps.value) {
+          return customTagRender(tagProps);
+        }
+        const option = fullSelectOptions.find(opt =>
+          utilsIsEqual(opt, tagProps.value, 'value'),
+        );
+        if (!option || option.label === undefined) {
+          return customTagRender(tagProps);
+        }
+        const label = shouldRenderChildrenOptions
+          ? option.customLabel || option.label
+          : option.label;
+        return customTagRender({ ...tagProps, label } as CustomTagProps);
+      },
+      [labelInValue, fullSelectOptions, shouldRenderChildrenOptions],
     );
 
     const omittedCount = useMemo(() => {
@@ -629,8 +689,8 @@ const Select = forwardRef(
           // @ts-ignore
           onPaste={onPaste}
           onPopupScroll={undefined}
-          onSearch={shouldShowSearch ? handleOnSearch : undefined}
-          onSelect={handleOnSelect}
+          onSearch={shouldShowSearch ? handleOnSearchInput : undefined}
+          onSelect={handleOnSelectAndClearSearch}
           onClear={handleClear}
           placeholder={placeholder}
           showSearch={shouldShowSearch}
@@ -649,9 +709,9 @@ const Select = forwardRef(
               <StyledCheckOutlined iconSize="m" aria-label="check" />
             )
           }
-          options={shouldRenderChildrenOptions ? undefined : fullSelectOptions}
+          options={shouldRenderChildrenOptions ? undefined : dropdownOptions}
           oneLine={oneLine}
-          tagRender={customTagRender}
+          tagRender={tagRender}
           {...props}
           ref={ref}
         >
@@ -665,8 +725,7 @@ const Select = forwardRef(
               {selectAllLabel()}
             </Option>
           )}
-          {shouldRenderChildrenOptions &&
-            renderSelectOptions(fullSelectOptions)}
+          {shouldRenderChildrenOptions && renderSelectOptions(dropdownOptions)}
         </StyledSelect>
       </StyledContainer>
     );

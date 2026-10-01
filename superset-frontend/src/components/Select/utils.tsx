@@ -21,7 +21,13 @@ import AntdSelect, { LabeledValue as AntdLabeledValue } from 'antd/lib/select';
 import { ReactElement, RefObject } from 'react';
 import Icons from 'src/components/Icons';
 import { StyledHelperText, StyledLoadingText, StyledSpin } from './styles';
-import { LabeledValue, RawValue, SelectOptionsType, V } from './types';
+import {
+  LabeledValue,
+  RawValue,
+  SelectOptionsType,
+  SelectProps,
+  V,
+} from './types';
 
 const { Option } = AntdSelect;
 
@@ -212,6 +218,30 @@ export const renderSelectOptions = (options: SelectOptionsType) =>
       </Option>
     );
   });
+
+export const removeSelectedOptions = (
+  options: SelectOptionsType,
+  selectValue: SelectProps['value'],
+): SelectOptionsType => {
+  const selected = ensureIsArray(selectValue) as (V | LabeledValue)[];
+  if (!selected.length) {
+    return options;
+  }
+  return options.reduce((acc, opt) => {
+    if (opt?.options) {
+      const groupOptions = removeSelectedOptions(opt.options, selectValue);
+      if (groupOptions.length) {
+        acc.push({
+          ...opt,
+          options: groupOptions,
+        } as SelectOptionsType[number]);
+      }
+    } else if (!hasOption(opt.value, selected)) {
+      acc.push(opt);
+    }
+    return acc;
+  }, [] as SelectOptionsType);
+};
 
 export const mapValues = (values: SelectOptionsType, labelInValue: boolean) =>
   labelInValue

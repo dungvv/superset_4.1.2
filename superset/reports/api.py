@@ -591,9 +591,13 @@ class ReportScheduleRestApi(BaseSupersetModelRestApi):
               application/json:
                 schema:
                   type: object
+                  required:
+                    - as_of_date
+                    - items
                   properties:
                     as_of_date:
                       type: string
+                      format: date
                     items:
                       type: array
                       items:
@@ -626,6 +630,20 @@ class ReportScheduleRestApi(BaseSupersetModelRestApi):
         as_of_date = payload.get("as_of_date")
         if not items:
             return self.response_400(message="items is required")
+        if not isinstance(items, list):
+            return self.response_400(message="items must be a list")
+        if not isinstance(as_of_date, str) or not as_of_date.strip():
+            return self.response_400(message="as_of_date is required")
+        as_of_date = as_of_date.strip()
+        try:
+            if datetime.strptime(as_of_date, "%Y-%m-%d").strftime(
+                "%Y-%m-%d"
+            ) != as_of_date:
+                raise ValueError
+        except ValueError:
+            return self.response_400(
+                message="as_of_date must be a valid date in YYYY-MM-DD format"
+            )
 
         max_batch = int(
             current_app.config.get("ALERT_REPORTS_SEND_NOW_MAX_BATCH", 10)
