@@ -94,6 +94,13 @@ const ComparisonBlock = styled.div`
   align-items: center;
 `;
 
+const UNCHANGED_GOOD_COLOR = '#1559A6';
+
+const UnchangedSuccessArrow = styled.span`
+  color: ${UNCHANGED_GOOD_COLOR};
+  margin-right: 4px;
+`;
+
 const Spacer = styled.div`
   height: 8px;
   flex-shrink: 0;
@@ -267,6 +274,9 @@ export default function KpiLineChart(props: KpiLineVizProps) {
     if (comparison.direction === 'none') {
       return (
         <ComparisonLine>
+          {comparison.isGood && (
+            <UnchangedSuccessArrow aria-hidden="true">▶</UnchangedSuccessArrow>
+          )}
           {prefix}Không đổi so với {targetLabel}
           {formattedTargetValue}
         </ComparisonLine>
