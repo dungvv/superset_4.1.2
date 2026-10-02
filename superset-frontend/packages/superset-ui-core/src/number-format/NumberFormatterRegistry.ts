@@ -20,6 +20,11 @@ import { FormatLocaleDefinition } from 'd3-format';
 import { RegistryWithDefaultKey, OverwritePolicy } from '../models';
 import { DEFAULT_D3_FORMAT } from './D3FormatConfig';
 import createD3NumberFormatter from './factories/createD3NumberFormatter';
+
+import createShortScaleFormatter, {
+  isShortScaleFormat,
+} from './factories/createShortScaleFormatter';
+
 import createSmartNumberFormatter from './factories/createSmartNumberFormatter';
 import NumberFormats from './NumberFormats';
 import NumberFormatter from './NumberFormatter';
@@ -67,10 +72,20 @@ export default class NumberFormatterRegistry extends RegistryWithDefaultKey<
     }
 
     // Create new formatter if does not exist
-    const formatter = createD3NumberFormatter({
-      formatString: targetFormat,
-      locale: this.d3Format,
-    });
+    // const formatter = createD3NumberFormatter({
+    //   formatString: targetFormat,
+    //   locale: this.d3Format,
+    // });
+    const formatter = isShortScaleFormat(targetFormat)
+      ? createShortScaleFormatter({
+          formatString: targetFormat,
+          locale: this.d3Format,
+        })
+      : createD3NumberFormatter({
+          formatString: targetFormat,
+          locale: this.d3Format,
+        });
+        
     this.registerValue(targetFormat, formatter);
 
     return formatter;

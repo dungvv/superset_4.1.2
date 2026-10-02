@@ -25,8 +25,12 @@ import {
 
 // D3 specific formatting config
 export const D3_FORMAT_DOCS = t(
-  'D3 format syntax: https://github.com/d3/d3-format',
-);
+  // 'D3 format syntax: https://github.com/d3/d3-format',
+  'D3 format syntax: https://github.com/d3/d3-format. ' +
+    'Also supports ".Nk" (e.g. ".1k" => 123.5k, ".2k" => 1.23M): ' +
+    'abbreviate to k/M/B/T with a fixed number of decimals; ' +
+    'add "~" (".1~k") to trim trailing zeros.',
+ );
 
 export const D3_NUMBER_FORMAT_DESCRIPTION_VALUES_TEXT = t(
   'Only applies when "Label Type" is set to show values.',
@@ -48,6 +52,8 @@ const d3Formatted: [string, string][] = [
   ',.3f',
   '+,',
   '$,.2f',
+  '.1k',
+  '.2k',
 ].map(fmt => [fmt, `${fmt} (${getNumberFormatter(fmt).preview()})`]);
 
 // input choices & options
