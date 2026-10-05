@@ -168,6 +168,44 @@ export const getColorFunction = (
           ? { cutoffValue: targetValueLeft!, extremeValue: targetValueRight! }
           : false;
       break;
+    case Comparator.TopN:
+      comparatorFunction = (value: number, allValues: number[]) => {
+        // Get unique sorted values descending, take the Nth value as the
+        // threshold (top N highest). All values >= threshold will be colored.
+        const sortedUnique = Array.from(new Set(allValues)).sort(
+          (a, b) => b - a,
+        );
+        const n = Math.max(1, Math.floor(Number(targetValue)));
+        if (sortedUnique.length === 0 || n <= 0) {
+          return false;
+        }
+        const threshold =
+          sortedUnique[Math.min(n - 1, sortedUnique.length - 1)];
+        const max = Math.max(...allValues);
+        return value >= threshold
+          ? { cutoffValue: threshold, extremeValue: max }
+          : false;
+      };
+      break;
+    case Comparator.BottomN:
+      comparatorFunction = (value: number, allValues: number[]) => {
+        // Get unique sorted values ascending, take the Nth value as the
+        // threshold (bottom N lowest). All values <= threshold will be colored.
+        const sortedUnique = Array.from(new Set(allValues)).sort(
+          (a, b) => a - b,
+        );
+        const n = Math.max(1, Math.floor(Number(targetValue)));
+        if (sortedUnique.length === 0 || n <= 0) {
+          return false;
+        }
+        const threshold =
+          sortedUnique[Math.min(n - 1, sortedUnique.length - 1)];
+        const min = Math.min(...allValues);
+        return value <= threshold
+          ? { cutoffValue: threshold, extremeValue: min }
+          : false;
+      };
+      break;
     default:
       comparatorFunction = () => false;
       break;
@@ -192,8 +230,24 @@ export const getColorFormatters = memoizeOne(
     columnConfig: ConditionalFormattingConfig[] | undefined,
     data: DataRecord[],
     alpha?: boolean,
-  ) =>
-    columnConfig?.reduce(
+  ) => {
+    if (!columnConfig) {
+      return [];
+    }
+    // TopN / BottomN rules are pushed to the END of the formatters list so
+    // that they have higher priority and are not overridden by other rules
+    // (the consumer applies formatters in order, last matching wins).
+    const sortedConfig = [
+      ...columnConfig.filter(
+        c =>
+          c?.operator !== Comparator.TopN && c?.operator !== Comparator.BottomN,
+      ),
+      ...columnConfig.filter(
+        c =>
+          c?.operator === Comparator.TopN || c?.operator === Comparator.BottomN,
+      ),
+    ];
+    return sortedConfig.reduce(
       (acc: ColorFormatters, config: ConditionalFormattingConfig) => {
         if (
           config?.column !== undefined &&
@@ -215,6 +269,7 @@ export const getColorFormatters = memoizeOne(
         }
         return acc;
       },
-      [],
-    ) ?? [],
+      [] as ColorFormatters,
+    );
+  },
 );

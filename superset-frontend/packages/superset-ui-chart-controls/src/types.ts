@@ -443,6 +443,8 @@ export enum Comparator {
   BetweenOrEqual = '≤ x ≤',
   BetweenOrLeftEqual = '≤ x <',
   BetweenOrRightEqual = '< x ≤',
+  TopN = 'Top N',
+  BottomN = 'Bottom N',
 }
 
 export const MultipleValueComparators = [

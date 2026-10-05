@@ -19,6 +19,7 @@
 
 import { css, styled, t } from '@superset-ui/core';
 import moment from 'moment';
+import 'moment-timezone';
 import { useEffect, useMemo } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import ListView from 'src/components/ListView';
@@ -34,6 +35,12 @@ import {
 import { AlertObject, LogObject } from 'src/features/alerts/types';
 
 const PAGE_SIZE = 25;
+
+// Vietnam timezone (UTC+7) - hardcoded per project requirement
+const VN_TIMEZONE = 'Asia/Ho_Chi_Minh';
+
+const formatVnDateTime = (value: string | number | Date) =>
+  moment(new Date(value)).tz(VN_TIMEZONE).format('YYYY-MM-DD hh:mm:ss a');
 
 const StyledHeader = styled.div`
   ${({ theme }) => css`
@@ -118,18 +125,17 @@ function ExecutionLog({
           row: {
             original: { scheduled_dttm: scheduledDttm },
           },
-        }: any) =>
-          moment(new Date(scheduledDttm)).format('YYYY-MM-DD hh:mm:ss a'),
+        }: any) => formatVnDateTime(scheduledDttm),
         accessor: 'scheduled_dttm',
-        Header: t('Scheduled at (UTC)'),
+        Header: t('Scheduled at (VN)'),
       },
       {
         Cell: ({
           row: {
             original: { start_dttm: startDttm },
           },
-        }: any) => moment(new Date(startDttm)).format('YYYY-MM-DD hh:mm:ss a'),
-        Header: t('Start at (UTC)'),
+        }: any) => formatVnDateTime(startDttm),
+        Header: t('Start at (VN)'),
         accessor: 'start_dttm',
       },
       {

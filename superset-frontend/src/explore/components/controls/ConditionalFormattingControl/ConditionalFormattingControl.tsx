@@ -134,6 +134,10 @@ const ConditionalFormattingControl = ({
         return `${targetValueLeft} ${Comparator.LessOrEqual} ${columnName} ${Comparator.LessThan} ${targetValueRight}`;
       case Comparator.BetweenOrRightEqual:
         return `${targetValueLeft} ${Comparator.LessThan} ${columnName} ${Comparator.LessOrEqual} ${targetValueRight}`;
+      case Comparator.TopN:
+        return `${t('Top')} ${targetValue} ${columnName}`;
+      case Comparator.BottomN:
+        return `${t('Bottom')} ${targetValue} ${columnName}`;
       default:
         return `${columnName} ${operator} ${targetValue}`;
     }

@@ -60,6 +60,8 @@ const operatorOptions = [
   { value: Comparator.BetweenOrEqual, label: '≤ x ≤' },
   { value: Comparator.BetweenOrLeftEqual, label: '≤ x <' },
   { value: Comparator.BetweenOrRightEqual, label: '< x ≤' },
+  { value: Comparator.TopN, label: t('Top N') },
+  { value: Comparator.BottomN, label: t('Bottom N') },
 ];
 
 const targetValueValidator =
@@ -94,6 +96,9 @@ const isOperatorMultiValue = (operator?: Comparator) =>
 
 const isOperatorNone = (operator?: Comparator) =>
   !operator || operator === Comparator.None;
+
+const isOperatorTopN = (operator?: Comparator) =>
+  operator === Comparator.TopN || operator === Comparator.BottomN;
 
 const rulesRequired = [{ required: true, message: t('Required') }];
 
@@ -138,53 +143,83 @@ const renderOperator = ({ showOnlyNone }: { showOnlyNone?: boolean } = {}) => (
   </FormItem>
 );
 
-const renderOperatorFields = ({ getFieldValue }: GetFieldValue) =>
-  isOperatorNone(getFieldValue('operator')) ? (
-    <Row gutter={12}>
-      <Col span={6}>{renderOperator()}</Col>
-    </Row>
-  ) : isOperatorMultiValue(getFieldValue('operator')) ? (
-    <Row gutter={12}>
-      <Col span={9}>
-        <FormItem
-          name="targetValueLeft"
-          label={t('Left value')}
-          rules={rulesTargetValueLeft}
-          dependencies={targetValueLeftDeps}
-          validateTrigger="onBlur"
-          trigger="onBlur"
-        >
-          <FullWidthInputNumber />
-        </FormItem>
-      </Col>
-      <Col span={6}>{renderOperator()}</Col>
-      <Col span={9}>
-        <FormItem
-          name="targetValueRight"
-          label={t('Right value')}
-          rules={rulesTargetValueRight}
-          dependencies={targetValueRightDeps}
-          validateTrigger="onBlur"
-          trigger="onBlur"
-        >
-          <FullWidthInputNumber />
-        </FormItem>
-      </Col>
-    </Row>
-  ) : (
+const renderOperatorFields = ({ getFieldValue }: GetFieldValue) => {
+  if (isOperatorNone(getFieldValue('operator'))) {
+    return (
+      <Row gutter={12}>
+        <Col span={6}>{renderOperator()}</Col>
+      </Row>
+    );
+  }
+  if (isOperatorMultiValue(getFieldValue('operator'))) {
+    return (
+      <Row gutter={12}>
+        <Col span={9}>
+          <FormItem
+            name="targetValueLeft"
+            label={t('Left value')}
+            rules={rulesTargetValueLeft}
+            dependencies={targetValueLeftDeps}
+            validateTrigger="onBlur"
+            trigger="onBlur"
+          >
+            <FullWidthInputNumber />
+          </FormItem>
+        </Col>
+        <Col span={6}>{renderOperator()}</Col>
+        <Col span={9}>
+          <FormItem
+            name="targetValueRight"
+            label={t('Right value')}
+            rules={rulesTargetValueRight}
+            dependencies={targetValueRightDeps}
+            validateTrigger="onBlur"
+            trigger="onBlur"
+          >
+            <FullWidthInputNumber />
+          </FormItem>
+        </Col>
+      </Row>
+    );
+  }
+  // Single value operators (>, <, ≥, ≤, =, ≠, Top N, Bottom N)
+  const isTopN = isOperatorTopN(getFieldValue('operator'));
+  return (
     <Row gutter={12}>
       <Col span={6}>{renderOperator()}</Col>
       <Col span={18}>
         <FormItem
           name="targetValue"
-          label={t('Target value')}
-          rules={rulesRequired}
+          label={isTopN ? t('Number of rows (N)') : t('Target value')}
+          rules={
+            isTopN
+              ? [
+                  ...rulesRequired,
+                  {
+                    validator: (_: any, value: number) =>
+                      value && Number(value) >= 1
+                        ? Promise.resolve()
+                        : Promise.reject(
+                            new Error(t('N must be a positive integer')),
+                          ),
+                  },
+                ]
+              : rulesRequired
+          }
+          extra={
+            isTopN ? (
+              <small style={{ color: '#999' }}>
+                {t('Top N rules have higher priority than other rules.')}
+              </small>
+            ) : null
+          }
         >
-          <FullWidthInputNumber />
+          <FullWidthInputNumber min={isTopN ? 1 : undefined} step={1} />
         </FormItem>
       </Col>
     </Row>
   );
+};
 
 export const FormattingPopoverContent = ({
   config,
