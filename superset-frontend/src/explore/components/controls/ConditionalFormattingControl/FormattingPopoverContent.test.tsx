@@ -119,3 +119,46 @@ test('renders None for operator when Green for increase is selected', async () =
   // Assert that the operator is set to 'None'
   expect(screen.getByText(/none/i)).toBeInTheDocument();
 });
+
+test('renders Top N and Bottom N in operator dropdown', async () => {
+  render(
+    <FormattingPopoverContent
+      onChange={mockOnChange}
+      columns={columns}
+      extraColorChoices={extraColorChoices}
+    />,
+  );
+
+  // Open operator dropdown
+  fireEvent.click(screen.getAllByLabelText('Operator')[0]);
+
+  // Verify Top N and Bottom N are present
+  expect(await screen.findByText('Top N')).toBeInTheDocument();
+  expect(await screen.findByText('Bottom N')).toBeInTheDocument();
+});
+
+test('shows Number of rows (N) label when Top N is selected', async () => {
+  render(
+    <FormattingPopoverContent
+      onChange={mockOnChange}
+      columns={columns}
+      extraColorChoices={extraColorChoices}
+    />,
+  );
+
+  // Select the Top N operator
+  fireEvent.change(screen.getAllByLabelText('Operator')[0], {
+    target: { value: Comparator.TopN },
+  });
+  fireEvent.click(await screen.findByText('Top N'));
+
+  // Assert that the label changes to 'Number of rows (N)'
+  expect(
+    await screen.findByText(/Number of rows \(N\)/i),
+  ).toBeInTheDocument();
+  expect(screen.queryByText('Target value')).not.toBeInTheDocument();
+  // Assert the priority hint is shown
+  expect(
+    screen.getByText(/Top N rules have higher priority than other rules./i),
+  ).toBeInTheDocument();
+});
