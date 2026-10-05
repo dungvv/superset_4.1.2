@@ -25,7 +25,7 @@ import {
 } from '@superset-ui/chart-controls';
 import { Form, FormItem, FormProps } from 'src/components/Form';
 import Select from 'src/components/Select/Select';
-import { Col, Row } from 'src/components';
+import { AntdForm, Col, Row } from 'src/components';
 import { InputNumber } from 'src/components/Input';
 import Button from 'src/components/Button';
 import { ConditionalFormattingConfig } from './types';
@@ -245,8 +245,29 @@ export const FormattingPopoverContent = ({
     );
   };
 
+  // Top N / Bottom N use a fixed color (green / red): set it automatically
+  // and lock the color picker while one of these operators is selected.
+  const [form] = AntdForm.useForm();
+  const [isColorLocked, setIsColorLocked] = useState(
+    isOperatorTopN(config?.operator),
+  );
+  const handleValuesChange = (
+    changedValues: Partial<ConditionalFormattingConfig>,
+  ) => {
+    if (!('operator' in changedValues)) return;
+    const { operator } = changedValues;
+    if (operator === Comparator.TopN) {
+      form.setFieldsValue({ colorScheme: theme.colors.success.dark1 });
+    } else if (operator === Comparator.BottomN) {
+      form.setFieldsValue({ colorScheme: theme.colors.error.dark1 });
+    }
+    setIsColorLocked(isOperatorTopN(operator));
+  };
+
   return (
     <Form
+      form={form}
+      onValuesChange={handleValuesChange}
       onFinish={onChange}
       initialValues={config}
       requiredMark="optional"
@@ -271,6 +292,7 @@ export const FormattingPopoverContent = ({
             initialValue={colorScheme[0].value}
           >
             <Select
+              disabled={isColorLocked}
               onChange={event => handleChange(event)}
               ariaLabel={t('Color scheme')}
               options={[...colorScheme, ...extraColorChoices]}

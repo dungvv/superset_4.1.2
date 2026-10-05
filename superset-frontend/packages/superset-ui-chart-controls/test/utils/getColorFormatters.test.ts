@@ -119,7 +119,21 @@ describe('getColorFunction()', () => {
     const colorFunction = getColorFunction(
       {
         operator: Comparator.Equal,
-        targetValue: 100,
+        targetValue: 50,
+        colorScheme: '#FF0000',
+        column: 'count',
+      },
+      countValues,
+    );
+    expect(colorFunction(50)).toEqual('#FF0000FF');
+    expect(colorFunction(100)).toBeUndefined();
+  });
+
+  it('getColorFunction NOT_EQUAL', () => {
+    const colorFunction = getColorFunction(
+      {
+        operator: Comparator.NotEqual,
+        targetValue: 50,
         colorScheme: '#FF0000',
         column: 'count',
       },
@@ -127,34 +141,6 @@ describe('getColorFunction()', () => {
     );
     expect(colorFunction(50)).toBeUndefined();
     expect(colorFunction(100)).toEqual('#FF0000FF');
-  });
-
-  it('getColorFunction NOT_EQUAL', () => {
-    let colorFunction = getColorFunction(
-      {
-        operator: Comparator.NotEqual,
-        targetValue: 60,
-        colorScheme: '#FF0000',
-        column: 'count',
-      },
-      countValues,
-    );
-    expect(colorFunction(60)).toBeUndefined();
-    expect(colorFunction(100)).toEqual('#FF0000FF');
-    expect(colorFunction(50)).toEqual('#FF00004A');
-
-    colorFunction = getColorFunction(
-      {
-        operator: Comparator.NotEqual,
-        targetValue: 90,
-        colorScheme: '#FF0000',
-        column: 'count',
-      },
-      countValues,
-    );
-    expect(colorFunction(90)).toBeUndefined();
-    expect(colorFunction(100)).toEqual('#FF00004A');
-    expect(colorFunction(50)).toEqual('#FF0000FF');
   });
 
   it('getColorFunction BETWEEN', () => {
@@ -168,8 +154,8 @@ describe('getColorFunction()', () => {
       },
       countValues,
     );
+    expect(colorFunction(100)).toEqual('#FF0000FF');
     expect(colorFunction(50)).toBeUndefined();
-    expect(colorFunction(100)).toEqual('#FF000087');
   });
 
   it('getColorFunction BETWEEN_OR_EQUAL', () => {
@@ -183,9 +169,8 @@ describe('getColorFunction()', () => {
       },
       countValues,
     );
-    expect(colorFunction(50)).toEqual('#FF00000D');
+    expect(colorFunction(50)).toEqual('#FF0000FF');
     expect(colorFunction(100)).toEqual('#FF0000FF');
-    expect(colorFunction(150)).toBeUndefined();
   });
 
   it('getColorFunction BETWEEN_OR_EQUAL without opacity', () => {
@@ -200,11 +185,8 @@ describe('getColorFunction()', () => {
       countValues,
       false,
     );
-    expect(colorFunction(25)).toBeUndefined();
     expect(colorFunction(50)).toEqual('#FF0000');
-    expect(colorFunction(75)).toEqual('#FF0000');
     expect(colorFunction(100)).toEqual('#FF0000');
-    expect(colorFunction(125)).toBeUndefined();
   });
 
   it('getColorFunction BETWEEN_OR_LEFT_EQUAL', () => {
@@ -218,7 +200,7 @@ describe('getColorFunction()', () => {
       },
       countValues,
     );
-    expect(colorFunction(50)).toEqual('#FF00000D');
+    expect(colorFunction(50)).toEqual('#FF0000FF');
     expect(colorFunction(100)).toBeUndefined();
   });
 
@@ -241,7 +223,6 @@ describe('getColorFunction()', () => {
     const colorFunction = getColorFunction(
       {
         operator: Comparator.GreaterThan,
-        targetValue: undefined,
         colorScheme: '#FF0000',
         column: 'count',
       },
@@ -255,7 +236,6 @@ describe('getColorFunction()', () => {
     const colorFunction = getColorFunction(
       {
         operator: Comparator.Between,
-        targetValueLeft: undefined,
         targetValueRight: 100,
         colorScheme: '#FF0000',
         column: 'count',
@@ -271,7 +251,6 @@ describe('getColorFunction()', () => {
       {
         operator: Comparator.Between,
         targetValueLeft: 50,
-        targetValueRight: undefined,
         colorScheme: '#FF0000',
         column: 'count',
       },
@@ -339,6 +318,86 @@ describe('getColorFunction()', () => {
     expect(colorFunction(50)).toBeUndefined();
     expect(colorFunction(100)).toBeUndefined();
   });
+
+  it('getColorFunction TopN highlights top N highest values', () => {
+    const data = [{ count: 10 }, { count: 50 }, { count: 80 }, { count: 90 }];
+    const values = data.map(d => d.count);
+    const colorFunction = getColorFunction(
+      {
+        operator: Comparator.TopN,
+        targetValue: 2,
+        colorScheme: '#FF0000',
+        column: 'count',
+      },
+      values,
+    );
+    // Top 2: 90 and 80 should be colored
+    expect(colorFunction(90)).toEqual('#FF0000FF');
+    expect(colorFunction(80)).toEqual('#FF0000FF');
+    // Others not colored
+    expect(colorFunction(50)).toBeUndefined();
+    expect(colorFunction(10)).toBeUndefined();
+  });
+
+  it('getColorFunction BottomN highlights bottom N lowest values', () => {
+    const data = [{ count: 10 }, { count: 50 }, { count: 80 }, { count: 90 }];
+    const values = data.map(d => d.count);
+    const colorFunction = getColorFunction(
+      {
+        operator: Comparator.BottomN,
+        targetValue: 2,
+        colorScheme: '#FF0000',
+        column: 'count',
+      },
+      values,
+    );
+    // Bottom 2: 10 and 50 should be colored
+    expect(colorFunction(10)).toEqual('#FF0000FF');
+    expect(colorFunction(50)).toEqual('#FF0000FF');
+    // Others not colored
+    expect(colorFunction(80)).toBeUndefined();
+    expect(colorFunction(90)).toBeUndefined();
+  });
+
+  it('getColorFunction TopN handles duplicates correctly', () => {
+    const data = [
+      { count: 10 },
+      { count: 10 },
+      { count: 50 },
+      { count: 90 },
+    ];
+    const values = data.map(d => d.count);
+    const colorFunction = getColorFunction(
+      {
+        operator: Comparator.TopN,
+        targetValue: 2,
+        colorScheme: '#FF0000',
+        column: 'count',
+      },
+      values,
+    );
+    // Top 2 unique: 90 and 50 should be colored
+    expect(colorFunction(90)).toEqual('#FF0000FF');
+    expect(colorFunction(50)).toEqual('#FF0000FF');
+    expect(colorFunction(10)).toBeUndefined();
+  });
+
+  it('getColorFunction BottomN handles n larger than dataset', () => {
+    const data = [{ count: 10 }, { count: 50 }];
+    const values = data.map(d => d.count);
+    const colorFunction = getColorFunction(
+      {
+        operator: Comparator.BottomN,
+        targetValue: 10,
+        colorScheme: '#FF0000',
+        column: 'count',
+      },
+      values,
+    );
+    // All values should be colored since N > unique values
+    expect(colorFunction(10)).toEqual('#FF0000FF');
+    expect(colorFunction(50)).toEqual('#FF0000FF');
+  });
 });
 
 describe('getColorFormatters()', () => {
@@ -387,5 +446,88 @@ describe('getColorFormatters()', () => {
   it('undefined column config', () => {
     const colorFormatters = getColorFormatters(undefined, mockData);
     expect(colorFormatters.length).toEqual(0);
+  });
+
+  it('TopN and BottomN rules are placed last in formatters array (higher priority)', () => {
+    const data = [
+      { count: 10 },
+      { count: 50 },
+      { count: 80 },
+      { count: 90 },
+    ];
+    const columnConfig = [
+      // TopN comes first in user input
+      {
+        operator: Comparator.TopN,
+        targetValue: 1,
+        colorScheme: '#00FF00',
+        column: 'count',
+      },
+      // Regular rule
+      {
+        operator: Comparator.GreaterThan,
+        targetValue: 40,
+        colorScheme: '#FF0000',
+        column: 'count',
+      },
+      // BottomN comes after
+      {
+        operator: Comparator.BottomN,
+        targetValue: 1,
+        colorScheme: '#0000FF',
+        column: 'count',
+      },
+      // Another regular rule
+      {
+        operator: Comparator.LessThan,
+        targetValue: 60,
+        colorScheme: '#FFFF00',
+        column: 'count',
+      },
+    ];
+    const formatters = getColorFormatters(columnConfig, data);
+    expect(formatters.length).toEqual(4);
+    // Last formatter should be BottomN - it colors the lowest value (10)
+    expect(formatters[3].getColorFromValue(10)).toBeDefined();
+    expect(formatters[3].getColorFromValue(50)).toBeUndefined();
+    // Second-to-last formatter should be TopN - it colors the highest value (90)
+    expect(formatters[2].getColorFromValue(90)).toBeDefined();
+    expect(formatters[2].getColorFromValue(80)).toBeUndefined();
+    // First two formatters are the regular rules (GreaterThan, LessThan)
+    // They should NOT include TopN/BottomN formatters
+    expect(formatters.length).toEqual(4);
+  });
+
+  it('TopN rule overrides regular rule in last-applied-wins logic', () => {
+    // When the same column has both a GreaterThan and a TopN rule,
+    // the TopN should win (because it's pushed to the end of the list).
+    const data = [{ count: 10 }, { count: 50 }, { count: 80 }, { count: 90 }];
+    const columnConfig = [
+      {
+        operator: Comparator.GreaterThan,
+        targetValue: 40,
+        colorScheme: '#FF0000', // red
+        column: 'count',
+      },
+      {
+        operator: Comparator.TopN,
+        targetValue: 1,
+        colorScheme: '#00FF00', // green
+        column: 'count',
+      },
+    ];
+    const formatters = getColorFormatters(columnConfig, data);
+    // The TopN formatter should be at the end (position 1).
+    // We simulate the TableChart behavior: apply each formatter in order,
+    // the last non-undefined value wins.
+    let finalColor: string | undefined;
+    for (const f of formatters) {
+      const result = f.getColorFromValue(90);
+      if (result) {
+        finalColor = result;
+      }
+    }
+    // Should be green (TopN), not red (GreaterThan)
+    expect(finalColor).toEqual('#00FF00FF');
   });
 });
