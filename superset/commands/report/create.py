@@ -137,8 +137,9 @@ class CreateReportScheduleCommand(CreateMixin, BaseReportScheduleCommand):
         if extra is None or dashboard is None:
             return
 
-        dashboard_state = extra.get("dashboard")
-        if not dashboard_state:
+        dashboard_state = extra.get("dashboard") or {}
+        dashboard_tabs = extra.get("dashboard_tabs") or []
+        if not dashboard_state and not dashboard_tabs:
             return
 
         position_data = json.loads(dashboard.position_json or "{}")
@@ -147,6 +148,11 @@ class CreateReportScheduleCommand(CreateMixin, BaseReportScheduleCommand):
         invalid_tab_ids = set(active_tabs) - set(position_data.keys())
         if anchor and anchor not in position_data:
             invalid_tab_ids.add(anchor)
+        invalid_tab_ids.update(
+            tab_id
+            for tab_id in dashboard_tabs
+            if (position_data.get(tab_id) or {}).get("type") != "TAB"
+        )
         if invalid_tab_ids:
             exceptions.append(
                 ValidationError(

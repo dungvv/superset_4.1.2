@@ -16,8 +16,12 @@
 # under the License.
 from typing import TypedDict
 
+from typing_extensions import NotRequired
+
 from superset.dashboards.permalink.types import DashboardPermalinkState
 
 
 class ReportScheduleExtra(TypedDict):
     dashboard: DashboardPermalinkState
+    # Dashboard tab ids to screenshot, one image per tab (empty = default view)
+    dashboard_tabs: NotRequired[list[str]]

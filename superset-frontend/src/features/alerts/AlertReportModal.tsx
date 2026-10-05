@@ -440,6 +440,13 @@ const AlertReportModal: FunctionComponent<AlertReportModalProps> = ({
   const [conditionNotNull, setConditionNotNull] = useState<boolean>(false);
   const [sourceOptions, setSourceOptions] = useState<MetaObject[]>([]);
   const [dashboardOptions, setDashboardOptions] = useState<MetaObject[]>([]);
+  // Tabs of the selected dashboard; picked ids are saved in extra.dashboard_tabs
+  const [dashboardTabOptions, setDashboardTabOptions] = useState<
+    { value: string; label: string }[]
+  >([]);
+  const [selectedDashboardTabs, setSelectedDashboardTabs] = useState<
+    string[]
+  >([]);
   const [chartOptions, setChartOptions] = useState<MetaObject[]>([]);
   // Validation
   const [validationStatus, setValidationStatus] = useState<ValidationObject>({
@@ -611,6 +618,7 @@ const AlertReportModal: FunctionComponent<AlertReportModalProps> = ({
     onHide();
     setNotificationSettings([]);
     setCurrentAlert({ ...defaultAlert });
+    setSelectedDashboardTabs([]);
     setNotificationAddState('active');
   };
 
@@ -655,8 +663,15 @@ const AlertReportModal: FunctionComponent<AlertReportModalProps> = ({
           ? JSON.parse(currentAlert.extra)
           : currentAlert?.extra || {}),
         send_as_zip: sendAsZip !== undefined ? sendAsZip : true,
+        dashboard_tabs:
+          contentType === 'dashboard' && selectedDashboardTabs.length
+            ? selectedDashboardTabs
+            : undefined,
       },
     };
+    if (!data.extra.dashboard_tabs) {
+      delete data.extra.dashboard_tabs;
+    }
 
     // BE 3.1.3 report schema has no email_subject field
     delete data.email_subject;
@@ -992,7 +1007,54 @@ const AlertReportModal: FunctionComponent<AlertReportModalProps> = ({
   const onDashboardChange = (dashboard: SelectValue) => {
     updateAlertState('dashboard', dashboard || undefined);
     updateAlertState('chart', null);
+    setSelectedDashboardTabs([]);
   };
+
+  const selectedDashboardId =
+    contentType === 'dashboard' ? currentAlert?.dashboard?.value : undefined;
+
+  // Load the selected dashboard's tabs; nested tabs are labelled with their path
+  useEffect(() => {
+    if (!selectedDashboardId) {
+      setDashboardTabOptions([]);
+      return undefined;
+    }
+    type TabNode = { value: string; title: string; children?: TabNode[] };
+    const flattenTabs = (
+      nodes: TabNode[],
+      parentLabel = '',
+    ): { value: string; label: string }[] =>
+      nodes.flatMap(node => {
+        const label = parentLabel
+          ? `${parentLabel} › ${node.title}`
+          : node.title;
+        return [
+          { value: node.value, label },
+          ...flattenTabs(node.children || [], label),
+        ];
+      });
+    let cancelled = false;
+    SupersetClient.get({
+      endpoint: `/api/v1/dashboard/${selectedDashboardId}/tabs`,
+    })
+      .then(({ json }) => {
+        if (cancelled) return;
+        const allTabs = flattenTabs(json?.result?.tab_tree || []);
+        // A single tab has nothing to choose from: keep the default view
+        const options = allTabs.length > 1 ? allTabs : [];
+        setDashboardTabOptions(options);
+        // Drop tabs that were removed from the dashboard since the report was saved
+        setSelectedDashboardTabs(tabs =>
+          tabs.filter(tab => options.some(option => option.value === tab)),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setDashboardTabOptions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedDashboardId]);
 
   const onChartChange = (chart: SelectValue) => {
     getChartVisualizationType(chart);
@@ -1271,8 +1333,10 @@ const AlertReportModal: FunctionComponent<AlertReportModalProps> = ({
       if (resource.extra) {
         const extra = typeof resource.extra === 'string' ? JSON.parse(resource.extra) : resource.extra;
         setSendAsZip(extra.send_as_zip);
+        setSelectedDashboardTabs((extra.dashboard_tabs || []).slice(0, 1));
       } else {
         setSendAsZip(undefined);
+        setSelectedDashboardTabs([]);
       }
 
       setCurrentAlert({
@@ -1688,6 +1752,28 @@ const AlertReportModal: FunctionComponent<AlertReportModalProps> = ({
                   onChange={onDashboardChange}
                   placeholder={t('Select dashboard to use')}
                 />
+                {dashboardTabOptions.length > 0 && (
+                  <>
+                    <div className="control-label" css={{ marginTop: 8 }}>
+                      {t('Select tab')}
+                      <InfoTooltipWithTrigger
+                        tooltip={t(
+                          'The report captures the selected tab. Leave empty to send the dashboard as it opens by default.',
+                        )}
+                      />
+                    </div>
+                    <Select
+                      ariaLabel={t('Select tab')}
+                      allowClear
+                      value={selectedDashboardTabs[0]}
+                      options={dashboardTabOptions}
+                      onChange={(tab?: string) =>
+                        setSelectedDashboardTabs(tab ? [tab] : [])
+                      }
+                      placeholder={t('Default (first tab)')}
+                    />
+                  </>
+                )}
               </>
             )}
           </StyledInputContainer>

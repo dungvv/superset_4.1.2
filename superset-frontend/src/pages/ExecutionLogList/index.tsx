@@ -39,8 +39,10 @@ const PAGE_SIZE = 25;
 // Vietnam timezone (UTC+7) - hardcoded per project requirement
 const VN_TIMEZONE = 'Asia/Ho_Chi_Minh';
 
+// The API returns naive UTC timestamps (no "Z" suffix), so they must be
+// parsed as UTC; `new Date()` would treat them as browser-local time.
 const formatVnDateTime = (value: string | number | Date) =>
-  moment(new Date(value)).tz(VN_TIMEZONE).format('YYYY-MM-DD hh:mm:ss a');
+  moment.utc(value).tz(VN_TIMEZONE).format('YYYY-MM-DD hh:mm:ss a');
 
 const StyledHeader = styled.div`
   ${({ theme }) => css`

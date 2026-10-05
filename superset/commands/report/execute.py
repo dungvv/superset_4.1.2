@@ -904,14 +904,52 @@ class BaseReportState:
             "urlParams": url_params,
         }
 
+    def _get_dashboard_tab_paths(self) -> list[list[str]]:
+        """
+        Tabs picked in the report config (extra.dashboard_tabs), each returned as
+        the activeTabs path needed to open it: parent tabs first, the tab last.
+        Tabs no longer on the dashboard are skipped; an empty list means the
+        dashboard is rendered as it opens by default.
+        """
+        dashboard = self._report_schedule.dashboard
+        # Only one tab can be picked in the report config
+        tab_ids = ((self._report_schedule.extra or {}).get("dashboard_tabs") or [])[:1]
+        if not dashboard or not tab_ids:
+            return []
+        try:
+            position = json.loads(dashboard.position_json or "{}")
+        except (TypeError, json.JSONDecodeError):
+            position = {}
+
+        paths: list[list[str]] = []
+        for tab_id in tab_ids:
+            component = position.get(tab_id)
+            if not isinstance(component, dict) or component.get("type") != "TAB":
+                logger.warning(
+                    "Report %s: tab %s not found on dashboard %s, skipping",
+                    self._report_schedule.id,
+                    tab_id,
+                    dashboard.id,
+                )
+                continue
+            parent_tabs = [
+                parent_id
+                for parent_id in component.get("parents") or []
+                if (position.get(parent_id) or {}).get("type") == "TAB"
+            ]
+            paths.append([*parent_tabs, tab_id])
+        return paths
+
     def _get_url(
         self,
         user_friendly: bool = False,
         result_format: Optional[ChartDataResultFormat] = None,
+        active_tabs: Optional[list[str]] = None,
         **kwargs: Any,
     ) -> str:
         """
-        Get the url for this report schedule: chart or dashboard
+        Get the url for this report schedule: chart or dashboard.
+        active_tabs opens the dashboard on those tabs (see _get_dashboard_tab_paths)
         """
         force = "true" if self._report_schedule.force_screenshot else "false"
         if self._report_schedule.chart:
@@ -937,9 +975,22 @@ class BaseReportState:
         # Send now: render dashboard via permalink with injected date filters
         if self._has_send_now_override() and self._report_schedule.dashboard:
             state = self._build_send_now_dashboard_state()
+            if active_tabs:
+                state["activeTabs"] = active_tabs
             permalink_key = CreateDashboardPermalinkCommand(
                 dashboard_id=str(self._report_schedule.dashboard.uuid),
                 state=state,
+            ).run()
+            return get_url_path("Superset.dashboard_permalink", key=permalink_key)
+
+        # Render the dashboard on the tabs picked in the report config
+        if active_tabs:
+            permalink_key = CreateDashboardPermalinkCommand(
+                dashboard_id=str(self._report_schedule.dashboard.uuid),
+                state={
+                    **(self._report_schedule.extra.get("dashboard") or {}),
+                    "activeTabs": active_tabs,
+                },
             ).run()
             return get_url_path("Superset.dashboard_permalink", key=permalink_key)
 
@@ -978,7 +1029,6 @@ class BaseReportState:
 
         with self._temporary_chart_query_context():
             with self._temporary_dashboard_charts_send_now():
-                url = self._get_url()
                 _, username = get_executor(
                     executor_types=app.config["ALERT_REPORTS_EXECUTE_AS"],
                     model=self._report_schedule,
@@ -993,14 +1043,14 @@ class BaseReportState:
                         self._report_schedule.custom_width or window_width,
                         self._report_schedule.custom_height or window_height,
                     )
-                    screenshot: Union[
-                        ChartScreenshot, DashboardScreenshot
-                    ] = ChartScreenshot(
-                        url,
-                        self._report_schedule.chart.digest,
-                        window_size=window_size,
-                        thumb_size=app.config["WEBDRIVER_WINDOW"]["slice"],
-                    )
+                    screenshots: list[Union[ChartScreenshot, DashboardScreenshot]] = [
+                        ChartScreenshot(
+                            self._get_url(),
+                            self._report_schedule.chart.digest,
+                            window_size=window_size,
+                            thumb_size=app.config["WEBDRIVER_WINDOW"]["slice"],
+                        )
+                    ]
                 else:
                     window_width, window_height = app.config["WEBDRIVER_WINDOW"][
                         "dashboard"
@@ -1009,24 +1059,37 @@ class BaseReportState:
                         self._report_schedule.custom_width or window_width,
                         self._report_schedule.custom_height or window_height,
                     )
-                    screenshot = DashboardScreenshot(
-                        url,
-                        self._report_schedule.dashboard.digest,
-                        window_size=window_size,
-                        thumb_size=app.config["WEBDRIVER_WINDOW"]["dashboard"],
-                    )
-                try:
-                    image = screenshot.get_screenshot(user=user)
-                except SoftTimeLimitExceeded as ex:
-                    logger.warning("A timeout occurred while taking a screenshot.")
-                    raise ReportScheduleScreenshotTimeout() from ex
-                except Exception as ex:
-                    raise ReportScheduleScreenshotFailedError(
-                        f"Failed taking a screenshot {str(ex)}"
-                    ) from ex
-                if not image:
-                    raise ReportScheduleScreenshotFailedError()
-                return [image]
+                    # One screenshot per selected tab, or the default view
+                    tab_paths: list[Optional[list[str]]] = [
+                        *self._get_dashboard_tab_paths()
+                    ] or [None]
+                    screenshots = [
+                        DashboardScreenshot(
+                            self._get_url(active_tabs=tab_path),
+                            self._report_schedule.dashboard.digest,
+                            window_size=window_size,
+                            thumb_size=app.config["WEBDRIVER_WINDOW"]["dashboard"],
+                        )
+                        for tab_path in tab_paths
+                    ]
+
+                images: list[bytes] = []
+                for screenshot in screenshots:
+                    try:
+                        image = screenshot.get_screenshot(user=user)
+                    except SoftTimeLimitExceeded as ex:
+                        logger.warning(
+                            "A timeout occurred while taking a screenshot."
+                        )
+                        raise ReportScheduleScreenshotTimeout() from ex
+                    except Exception as ex:
+                        raise ReportScheduleScreenshotFailedError(
+                            f"Failed taking a screenshot {str(ex)}"
+                        ) from ex
+                    if not image:
+                        raise ReportScheduleScreenshotFailedError()
+                    images.append(image)
+                return images
 
     def _get_pdf(self) -> bytes:
         """

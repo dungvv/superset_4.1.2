@@ -440,7 +440,7 @@ describe('getColorFormatters()', () => {
     expect(colorFormatters[1].getColorFromValue(400)).toBeUndefined();
 
     expect(colorFormatters[2].column).toEqual('count');
-    expect(colorFormatters[2].getColorFromValue(100)).toEqual('#FF000087');
+    expect(colorFormatters[2].getColorFromValue(100)).toEqual('#FF0000FF');
   });
 
   it('undefined column config', () => {
