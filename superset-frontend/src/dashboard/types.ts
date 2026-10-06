@@ -194,6 +194,8 @@ export type LayoutItem = {
     text?: string;
     uuid: string;
     width: number;
+    // position in the free grid (DASHBOARD_FREE_GRID)
+    freeGrid?: { x: number; y: number; w: number; h: number };
   };
 };
 

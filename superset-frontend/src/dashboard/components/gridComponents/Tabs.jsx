@@ -38,6 +38,10 @@ import { TABS_TYPE, TAB_TYPE } from '../../util/componentTypes';
 import { EagerTabLoadingContext } from '../../contexts/EagerTabLoadingContext';
 
 const propTypes = {
+  freeGrid: PropTypes.shape({
+    width: PropTypes.number,
+    height: PropTypes.number,
+  }),
   id: PropTypes.string.isRequired,
   parentId: PropTypes.string.isRequired,
   component: componentShape.isRequired,
@@ -349,6 +353,7 @@ export class Tabs extends PureComponent {
         index={index}
         depth={depth}
         onDrop={this.handleDrop}
+        disableDragDrop={!!this.props.freeGrid}
         editMode={editMode}
       >
         {({ dragSourceRef: tabsDragSourceRef }) => (

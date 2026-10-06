@@ -33,6 +33,8 @@ import DragDroppable, {
 import DashboardComponent from 'src/dashboard/containers/DashboardComponent';
 import { TAB_TYPE } from 'src/dashboard/util/componentTypes';
 import { componentShape } from 'src/dashboard/util/propShapes';
+import { isFreeGridEnabled } from 'src/dashboard/util/freeGridLayout';
+import FreeGrid from 'src/dashboard/components/FreeGrid/FreeGrid';
 
 export const RENDER_TAB = 'RENDER_TAB';
 export const RENDER_TAB_CONTENT = 'RENDER_TAB_CONTENT';
@@ -162,6 +164,9 @@ class Tab extends PureComponent {
     } = this.props;
 
     const shouldDisplayEmptyState = tabComponent.children.length === 0;
+    if (isFreeGridEnabled()) {
+      return this.renderFreeGridTabContent(shouldDisplayEmptyState);
+    }
     return (
       <div className="dashboard-component-tabs-content">
         {/* Make top of tab droppable */}
@@ -256,6 +261,76 @@ class Tab extends PureComponent {
             )}
           </Fragment>
         ))}
+      </div>
+    );
+  }
+
+  renderFreeGridTabContent(shouldDisplayEmptyState) {
+    const {
+      component: tabComponent,
+      depth,
+      editMode,
+      isComponentVisible,
+      canEdit,
+      setEditMode,
+    } = this.props;
+    const childCount = tabComponent.children.length;
+
+    return (
+      <div className="dashboard-component-tabs-content">
+        {shouldDisplayEmptyState && (
+          <EmptyStateMedium
+            title={
+              editMode
+                ? t('Drag and drop components to this tab')
+                : t('There are no components added to this tab')
+            }
+            description={
+              canEdit &&
+              !editMode && (
+                <span>
+                  {t('You can add the components in the')}{' '}
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setEditMode(true)}
+                  >
+                    {t('edit mode')}
+                  </span>
+                </span>
+              )
+            }
+            image="chart.svg"
+          />
+        )}
+        {childCount > 0 && (
+          <FreeGrid
+            containerId={tabComponent.id}
+            depth={depth} // see isValidChild.js for why tabs don't increment child depth
+            isComponentVisible={isComponentVisible}
+            onChangeTab={this.handleChangeTab}
+          />
+        )}
+        {/* new components are appended below the free grid */}
+        {editMode && (
+          <Droppable
+            component={tabComponent}
+            orientation="column"
+            index={childCount}
+            depth={depth}
+            onDrop={
+              childCount === 0 ? this.handleTopDropTargetDrop : this.handleDrop
+            }
+            editMode
+            className={classNames({
+              'empty-droptarget': true,
+              'empty-droptarget--full': childCount === 0,
+            })}
+            dropToChild={childCount === 0}
+          >
+            {renderDraggableContent}
+          </Droppable>
+        )}
       </div>
     );
   }

@@ -157,6 +157,26 @@ const getChartId = (report: AlertObject): number | null => {
   return null;
 };
 
+const getDashboardId = (report: AlertObject): number | null => {
+  if (typeof report.dashboard_id === 'number' && report.dashboard_id > 0) {
+    return report.dashboard_id;
+  }
+  const dashValue = report.dashboard?.value ?? report.dashboard?.id;
+  if (typeof dashValue === 'number' && dashValue > 0) {
+    return dashValue;
+  }
+  if (typeof dashValue === 'string' && dashValue.trim()) {
+    const parsed = Number(dashValue);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+  return null;
+};
+
+// Dashboard reports take each chart's date column from its dataset, so the
+// column is optional there (it only overrides the dataset default).
+const isDashboardReport = (report: AlertObject): boolean =>
+  !getChartId(report) && Boolean(getDashboardId(report));
+
 const getDefaultFilterDate = (report: AlertObject): string => {
   const extra =
     typeof report.extra === 'string'
@@ -192,21 +212,6 @@ function SendNowModal({ show, reports, onHide, onSend }: SendNowModalProps) {
     setDatasetNames({});
 
     let cancelled = false;
-
-    const getDashboardId = (report: AlertObject): number | null => {
-      if (typeof report.dashboard_id === 'number' && report.dashboard_id > 0) {
-        return report.dashboard_id;
-      }
-      const dashValue = report.dashboard?.value ?? report.dashboard?.id;
-      if (typeof dashValue === 'number' && dashValue > 0) {
-        return dashValue;
-      }
-      if (typeof dashValue === 'string' && dashValue.trim()) {
-        const parsed = Number(dashValue);
-        return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-      }
-      return null;
-    };
 
     const loadDatasetNames = async () => {
       const next: Record<number, string> = {};
@@ -306,7 +311,7 @@ function SendNowModal({ show, reports, onHide, onSend }: SendNowModalProps) {
   }, [show, reports]);
 
   const missingFilterDates = reports.filter(
-    report => !filterDates[report.id]?.trim(),
+    report => !isDashboardReport(report) && !filterDates[report.id]?.trim(),
   );
   const overMaxBatch = reports.length > SEND_NOW_MAX_BATCH;
   const canSend =
@@ -328,7 +333,7 @@ function SendNowModal({ show, reports, onHide, onSend }: SendNowModalProps) {
       items: reports.map(report => ({
         id: report.id,
         name: report.name || '',
-        filter_date: filterDates[report.id].trim(),
+        filter_date: (filterDates[report.id] || '').trim(),
       })),
     });
   };
@@ -382,14 +387,13 @@ function SendNowModal({ show, reports, onHide, onSend }: SendNowModalProps) {
           <div className="reports-header">
             <div>{t('Report')}</div>
             <div>{t('Source')}</div>
-            <div>
-              {t('Filter date column')}
-              <span className="required">*</span>
-            </div>
+            <div>{t('Filter date column')}</div>
           </div>
           <div className="reports-body">
             {reports.map(report => {
-              const hasError = touched && !filterDates[report.id]?.trim();
+              const isDashboard = isDashboardReport(report);
+              const hasError =
+                touched && !isDashboard && !filterDates[report.id]?.trim();
               const datasetLabel = datasetNames[report.id];
               return (
                 <div className="report-row" key={report.id}>
@@ -410,7 +414,11 @@ function SendNowModal({ show, reports, onHide, onSend }: SendNowModalProps) {
                       <input
                         type="text"
                         value={filterDates[report.id] || ''}
-                        placeholder={t('e.g. BUSINESS_DATE')}
+                        placeholder={
+                          isDashboard
+                            ? t('Auto (dataset default datetime)')
+                            : t('e.g. BUSINESS_DATE')
+                        }
                         onChange={onFilterDateChange(report.id)}
                         className={hasError ? 'error' : undefined}
                         data-test={`send-now-filter-date-${report.id}`}
@@ -424,7 +432,11 @@ function SendNowModal({ show, reports, onHide, onSend }: SendNowModalProps) {
           </div>
         </div>
         <div className="helper">
-          {t('Filter date column must be a temporal (date) column on the dataset')}
+          {t(
+            'Chart reports: required, a temporal (date) column on the dataset. ' +
+              'Dashboard reports: optional; each chart uses this column when its ' +
+              'dataset has it, otherwise the dataset "Default datetime" column.',
+          )}
         </div>
       </StyledForm>
     </Modal>

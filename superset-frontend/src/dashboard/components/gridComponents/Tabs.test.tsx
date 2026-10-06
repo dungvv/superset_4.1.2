@@ -156,7 +156,9 @@ test('mounts inactive tab content when eager loading is enabled', () => {
     { useRedux: true, useDnd: true },
   );
 
-  const contentComponents = (DashboardComponent as unknown as jest.Mock).mock.calls
+  const contentComponents = (
+    DashboardComponent as unknown as jest.Mock
+  ).mock.calls
     .map(([componentProps]) => componentProps)
     .filter(
       componentProps => componentProps.renderType === 'RENDER_TAB_CONTENT',
