@@ -240,6 +240,17 @@ export const DashboardPage: FC<PageProps> = ({ idOrSlug }: PageProps) => {
         if (!hasExplicitSelection && savedTabs) {
           ({ activeTabs } = savedTabs);
         }
+        // A permalink only stores activeTabs, but the tab shown by the
+        // dashboard (top level tabs included) follows directPathToChild:
+        // open the permalink's innermost tab, e.g. for report screenshots.
+        let permalinkPath: string[] | undefined;
+        if (permalinkKey && activeTabs?.length) {
+          const leafTab = activeTabs[activeTabs.length - 1];
+          const tabComponent = dashboard?.position_data?.[leafTab];
+          if (tabComponent) {
+            permalinkPath = [...(tabComponent.parents || []), leafTab];
+          }
+        }
         if (!isDashboardHydrated.current) {
           isDashboardHydrated.current = true;
         }
@@ -250,7 +261,7 @@ export const DashboardPage: FC<PageProps> = ({ idOrSlug }: PageProps) => {
             charts,
             activeTabs,
             directPathToChild: hasExplicitSelection
-              ? undefined
+              ? permalinkPath
               : savedTabs?.directPathToChild,
             dataMask,
           }),

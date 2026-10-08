@@ -14,15 +14,17 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+import calendar
 import logging
 from contextlib import contextmanager
 from copy import deepcopy
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Iterator, Optional, Union
 from uuid import UUID
 
 import pandas as pd
 from celery.exceptions import SoftTimeLimitExceeded
+from flask import g
 
 from superset import app, db, security_manager
 from superset.commands.base import BaseCommand
@@ -105,18 +107,18 @@ def _is_relative_sql_clause(sql: str) -> bool:
     return any(marker in text_sql for marker in markers)
 
 
-def _filter_keeps_for_send_now(flt: dict[str, Any], col: str) -> bool:
+def _filter_keeps_for_send_now(flt: dict[str, Any], col: Optional[str]) -> bool:
     """Keep non-temporal filters that are unrelated to the send-now date column."""
     subject = str(flt.get("col") or flt.get("subject") or "").casefold()
     op = flt.get("op") or flt.get("operator")
-    if subject == col.casefold():
+    if col and subject == col.casefold():
         return False
     if op == FilterOperator.TEMPORAL_RANGE.value:
         return False
     sql_expr = flt.get("sqlExpression") or ""
     if _is_relative_sql_clause(sql_expr):
         return False
-    if col.casefold() in sql_expr.casefold():
+    if col and col.casefold() in sql_expr.casefold():
         return False
     return True
 
@@ -129,6 +131,177 @@ def _oracle_send_now_where(col: str, day: str) -> str:
     return (
         f"TRUNC({col}) >= TO_DATE('{day}', 'YYYY-MM-DD') "
         f"AND TRUNC({col}) < TO_DATE('{next_day}', 'YYYY-MM-DD')"
+    )
+
+
+def _sanitize_saved_dashboard_filters(
+    form_data: dict[str, Any], col: Optional[str]
+) -> None:
+    """
+    Drop date constraints that a chart inherited from dashboard native filters.
+
+    Charts edited from a dashboard are saved with the dashboard's filter state
+    in ``extra_form_data`` (e.g. report_date IN (...), time_range "Last day",
+    TRUNC(SYSDATE) SQL). The frontend merges it into every query, so together
+    with the Send now date it returns No data. Keep the non-date parts.
+    """
+    extra = form_data.get("extra_form_data")
+    if isinstance(extra, dict):
+        extra = dict(extra)
+        for key in (
+            "time_range",
+            "granularity_sqla",
+            "relative_start",
+            "relative_end",
+        ):
+            extra.pop(key, None)
+        extra["filters"] = [
+            flt
+            for flt in extra.get("filters") or []
+            if isinstance(flt, dict) and _filter_keeps_for_send_now(flt, col)
+        ]
+        extra["adhoc_filters"] = [
+            flt
+            for flt in extra.get("adhoc_filters") or []
+            if isinstance(flt, dict)
+            and _filter_keeps_for_send_now(
+                {
+                    "subject": flt.get("subject"),
+                    "operator": flt.get("operator"),
+                    "sqlExpression": flt.get("sqlExpression"),
+                },
+                col,
+            )
+        ]
+        for key in ("filters", "adhoc_filters"):
+            if not extra[key]:
+                extra.pop(key)
+        form_data["extra_form_data"] = extra
+
+    if isinstance(form_data.get("extra_filters"), list):
+        form_data["extra_filters"] = [
+            flt
+            for flt in form_data["extra_filters"]
+            if isinstance(flt, dict) and _filter_keeps_for_send_now(flt, col)
+        ]
+
+
+def _shift_month(day: date, months: int) -> date:
+    """Same day ``months`` away, clamped to month end (as the time filter does)."""
+    index = day.year * 12 + day.month - 1 + months
+    year, month = divmod(index, 12)
+    month += 1
+    return date(year, month, min(day.day, calendar.monthrange(year, month)[1]))
+
+
+def build_send_now_template_params(as_of_date: str) -> dict[str, str]:
+    """
+    Date parameters the dashboard time filter (plugin-chart-time-filter) puts in
+    the URL for grain "day": month-to-date up to the day, compared with the same
+    span of the previous month. Datasets read them via url_param() / extras.
+    """
+    day = datetime.strptime(as_of_date[:10], "%Y-%m-%d").date()
+    cur_start = day.replace(day=1)
+    cmp_end = _shift_month(day, -1)
+    cmp_start = cmp_end.replace(day=1)
+
+    def time_range(start: date, end: date) -> str:
+        return f"{start.isoformat()} : {(end + timedelta(days=1)).isoformat()}"
+
+    return {
+        "time_grain": "day",
+        "grain_value": day.isoformat(),
+        "time_range": "|".join(
+            [
+                cur_start.isoformat(),
+                day.isoformat(),
+                cmp_start.isoformat(),
+                cmp_end.isoformat(),
+                "day",
+            ]
+        ),
+        "current_time_range": time_range(cur_start, day),
+        "comparison_time_range": time_range(cmp_start, cmp_end),
+        "current_start_date": cur_start.isoformat(),
+        "current_end_date": day.isoformat(),
+        "comparison_start_date": cmp_start.isoformat(),
+        "comparison_end_date": cmp_end.isoformat(),
+        "time_group": "day",
+    }
+
+
+# Template params that also travel as query extras (EXTRA_FORM_DATA override keys)
+_SEND_NOW_EXTRA_KEYS = (
+    "current_start_date",
+    "current_end_date",
+    "comparison_start_date",
+    "comparison_end_date",
+    "comparison_time_range",
+    "time_group",
+)
+
+
+def _send_now_extras(params: dict[str, str]) -> dict[str, str]:
+    extras = {key: params[key] for key in _SEND_NOW_EXTRA_KEYS}
+    extras["time_range_params"] = params["time_range"]
+    return extras
+
+
+def apply_send_now_template_params(
+    form_data: dict[str, Any], params: dict[str, str]
+) -> None:
+    """Set url_params / extra_form_data date params on a chart's form_data."""
+    url_params = form_data.get("url_params")
+    form_data["url_params"] = {
+        **(url_params if isinstance(url_params, dict) else {}),
+        **params,
+    }
+    extra = form_data.get("extra_form_data")
+    form_data["extra_form_data"] = {
+        **(extra if isinstance(extra, dict) else {}),
+        **_send_now_extras(params),
+    }
+
+
+def apply_send_now_template_params_to_query_context(
+    query_context: dict[str, Any], params: dict[str, str]
+) -> None:
+    """Same as apply_send_now_template_params, for a saved query_context."""
+    for query in query_context.get("queries") or []:
+        url_params = query.get("url_params")
+        query["url_params"] = {
+            **(url_params if isinstance(url_params, dict) else {}),
+            **params,
+        }
+        extras = query.get("extras")
+        query["extras"] = {
+            **(extras if isinstance(extras, dict) else {}),
+            **_send_now_extras(params),
+        }
+    form_data = query_context.get("form_data")
+    if isinstance(form_data, dict):
+        apply_send_now_template_params(form_data, params)
+
+
+def _chart_uses_date_template(chart: Any) -> bool:
+    """
+    True when the chart's dataset SQL takes its dates from the time filter
+    params (url_param('current_start_date'), {{ current_end_date }}, ...).
+    Such charts are driven by those params only: an extra one-day filter on
+    filter_date would cut month-to-date / total rows and return No data.
+    """
+    try:
+        sql = getattr(chart.datasource, "sql", None) or ""
+    except Exception:  # pylint: disable=broad-except
+        return False
+    return any(
+        marker in sql
+        for marker in (
+            "current_start_date",
+            "current_end_date",
+            "comparison_start_date",
+            "time_range_params",
+        )
     )
 
 
@@ -258,6 +431,7 @@ def apply_send_now_to_query_context(
         form_data["granularity_sqla"] = col
     form_data.pop("relative_start", None)
     form_data.pop("relative_end", None)
+    _sanitize_saved_dashboard_filters(form_data, col)
     qc["form_data"] = form_data
     qc["force"] = True
     return qc
@@ -291,6 +465,61 @@ def _chart_db_backend(chart: Any) -> str:
     except Exception:  # pylint: disable=broad-except
         pass
     return "oracle"
+
+
+def _chart_has_column(chart: Any, col: str) -> bool:
+    """True when the chart's datasource exposes a column named ``col``."""
+    try:
+        columns = getattr(chart.datasource, "columns", None) or []
+    except Exception:  # pylint: disable=broad-except
+        return False
+    target = col.casefold()
+    return any(
+        (getattr(column, "column_name", None) or "").casefold() == target
+        for column in columns
+    )
+
+
+def _chart_default_dttm_column(chart: Any) -> Optional[str]:
+    """The dataset's "Default datetime" column, when it is a temporal column."""
+    try:
+        datasource = chart.datasource
+        name = getattr(datasource, "main_dttm_col", None)
+        columns = getattr(datasource, "columns", None) or []
+    except Exception:  # pylint: disable=broad-except
+        return None
+    if not name:
+        return None
+    for column in columns:
+        if (getattr(column, "column_name", None) or "") == name and getattr(
+            column, "is_dttm", False
+        ):
+            return name
+    return None
+
+
+def _native_filters_on_column(
+    metadata: dict[str, Any], cols: set[str]
+) -> list[dict[str, Any]]:
+    """Non-time native filters whose target column is a send-now date column."""
+    cols = {col.casefold() for col in cols}
+    matched = []
+    for native_filter in metadata.get("native_filter_configuration") or []:
+        if not isinstance(native_filter, dict) or not native_filter.get("id"):
+            continue
+        if native_filter.get("filterType") == "filter_time":
+            continue
+        for target in native_filter.get("targets") or []:
+            if not isinstance(target, dict):
+                continue
+            column = target.get("column")
+            if not isinstance(column, dict):
+                continue
+            name = column.get("name") or column.get("column_name") or ""
+            if name.casefold() in cols:
+                matched.append(native_filter)
+                break
+    return matched
 
 
 def enforce_send_now_on_query_context(
@@ -376,8 +605,12 @@ class BaseReportState:
         self._start_dttm = datetime.utcnow()
         self._execution_id = execution_id
 
-        # Prefer explicit Celery kwargs; fall back to extra.send_now for audit path
+        # Prefer explicit Celery kwargs; fall back to extra.send_now only for
+        # the execution Send now queued (same task id). Scheduled runs have
+        # other task ids, so they never pick up an old Send now date.
         send_now = (report_schedule.extra or {}).get("send_now") or {}
+        if str(send_now.get("task_id") or "") != str(execution_id):
+            send_now = {}
         self._as_of_date = as_of_date or send_now.get("as_of_date")
         self._filter_date = filter_date or send_now.get("filter_date")
         if isinstance(self._as_of_date, str):
@@ -386,7 +619,21 @@ class BaseReportState:
             self._filter_date = self._filter_date.strip() or None
 
     def _has_send_now_override(self) -> bool:
-        return bool(self._as_of_date and self._filter_date)
+        # Dashboards resolve the date column per chart, so filter_date is
+        # optional there; chart reports still need it.
+        if not self._as_of_date:
+            return False
+        return bool(self._filter_date or self._report_schedule.dashboard)
+
+    def _send_now_date_column(self, chart: Any) -> Optional[str]:
+        """
+        Date column used for this chart's one-day filter: the typed
+        filter_date when the chart's dataset has it, otherwise the dataset's
+        "Default datetime" column. None when neither applies.
+        """
+        if self._filter_date and _chart_has_column(chart, self._filter_date):
+            return self._filter_date.strip()
+        return _chart_default_dttm_column(chart)
 
     def _send_now_explore_form_data(self) -> dict[str, Any]:
         form_data: dict[str, Any] = {"slice_id": self._report_schedule.chart_id}
@@ -402,8 +649,13 @@ class BaseReportState:
         if not self._has_send_now_override():
             return form_data
         assert self._as_of_date and self._filter_date
-        time_range = _build_send_now_time_range(self._as_of_date)
         col = self._filter_date
+        template_params = build_send_now_template_params(self._as_of_date)
+        if chart and not self._send_now_uses_date_filter(chart):
+            _sanitize_saved_dashboard_filters(form_data, col)
+            apply_send_now_template_params(form_data, template_params)
+            return form_data
+        time_range = _build_send_now_time_range(self._as_of_date)
         adhoc_filters = []
         for flt in form_data.get("adhoc_filters") or []:
             if not isinstance(flt, dict):
@@ -433,6 +685,8 @@ class BaseReportState:
         form_data["granularity_sqla"] = col
         form_data.pop("relative_start", None)
         form_data.pop("relative_end", None)
+        _sanitize_saved_dashboard_filters(form_data, col)
+        apply_send_now_template_params(form_data, template_params)
         return form_data
 
     def _run_chart_data_with_send_now(
@@ -464,26 +718,48 @@ class BaseReportState:
                 "Send now: datasource backend unknown, defaulting to oracle-safe filters"
             )
 
-        qc_dict = apply_send_now_to_query_context(
-            json.loads(chart.query_context),
-            self._as_of_date,
-            self._filter_date,
-            backend=backend,
+        use_date_filter = self._send_now_uses_date_filter(chart)
+        qc_dict = json.loads(chart.query_context)
+        if use_date_filter:
+            qc_dict = apply_send_now_to_query_context(
+                qc_dict,
+                self._as_of_date,
+                self._filter_date,
+                backend=backend,
+            )
+        elif isinstance(qc_dict.get("form_data"), dict):
+            _sanitize_saved_dashboard_filters(
+                qc_dict["form_data"], self._filter_date.strip()
+            )
+        apply_send_now_template_params_to_query_context(
+            qc_dict, build_send_now_template_params(self._as_of_date)
         )
         qc_dict["result_format"] = result_format
         qc_dict["result_type"] = ChartDataResultType.POST_PROCESSED
         qc_dict["force"] = True
 
         query_context = ChartDataQueryContextSchema().load(qc_dict)
-        enforce_send_now_on_query_context(
-            query_context,
-            self._as_of_date,
-            self._filter_date,
-            backend=backend,
-        )
+        if use_date_filter:
+            enforce_send_now_on_query_context(
+                query_context,
+                self._as_of_date,
+                self._filter_date,
+                backend=backend,
+            )
         command = ChartDataCommand(query_context)
         command.validate()
-        result = command.run()
+        # url_param() reads url_params from g.form_data when there is no
+        # request (Celery), so datasets see the Send now dates.
+        had_form_data = hasattr(g, "form_data")
+        previous_form_data = getattr(g, "form_data", None)
+        g.form_data = deepcopy(qc_dict)
+        try:
+            result = command.run()
+        finally:
+            if had_form_data:
+                g.form_data = previous_form_data
+            else:
+                g.pop("form_data", None)
 
         # Log generated SQL so we can verify the date filter landed
         for idx, query in enumerate(result.get("queries") or []):
@@ -507,51 +783,121 @@ class BaseReportState:
         )
         return result
 
+    def _send_now_uses_date_filter(self, chart: Any) -> bool:
+        """
+        Whether Send now adds the one-day date filter to this chart.
+        Charts whose dataset takes dates from the time filter params get those
+        params instead (see _chart_uses_date_template).
+        """
+        return bool(
+            self._send_now_date_column(chart)
+        ) and not _chart_uses_date_template(chart)
+
+    def _send_now_patch_chart(self, chart: Any) -> tuple[Optional[str], str]:
+        """
+        Return Send now versions of (query_context, params) for one chart:
+        the as-of date as time filter params (url_params / extras) for every
+        chart, plus the one-day filter_date filter where it applies.
+        """
+        assert self._as_of_date
+        col = self._send_now_date_column(chart)
+        template_params = build_send_now_template_params(self._as_of_date)
+        use_date_filter = self._send_now_uses_date_filter(chart)
+        backend = _chart_db_backend(chart)
+
+        query_context: Optional[str] = chart.query_context
+        patched_form_data: Optional[dict[str, Any]] = None
+        if chart.query_context:
+            try:
+                qc_dict = json.loads(chart.query_context)
+                if isinstance(qc_dict, dict):
+                    if use_date_filter:
+                        assert col
+                        qc_dict = apply_send_now_to_query_context(
+                            qc_dict,
+                            self._as_of_date,
+                            col,
+                            backend=backend,
+                        )
+                        if isinstance(qc_dict.get("form_data"), dict):
+                            patched_form_data = qc_dict["form_data"]
+                    elif isinstance(qc_dict.get("form_data"), dict):
+                        _sanitize_saved_dashboard_filters(qc_dict["form_data"], col)
+                    apply_send_now_template_params_to_query_context(
+                        qc_dict, template_params
+                    )
+                    qc_dict["force"] = True
+                    query_context = json.dumps(qc_dict)
+            except (TypeError, json.JSONDecodeError, ValueError) as ex:
+                logger.warning(
+                    "Send now: skip query_context patch slice_id=%s: %s",
+                    chart.id,
+                    ex,
+                )
+
+        try:
+            params = json.loads(chart.params) if chart.params else {}
+        except (TypeError, json.JSONDecodeError):
+            params = {}
+        if not isinstance(params, dict):
+            params = {}
+
+        if use_date_filter and patched_form_data is not None:
+            params["adhoc_filters"] = patched_form_data.get("adhoc_filters", [])
+            for key in ("time_range", "granularity_sqla"):
+                if key in patched_form_data:
+                    params[key] = patched_form_data[key]
+                else:
+                    params.pop(key, None)
+            params.pop("relative_start", None)
+            params.pop("relative_end", None)
+        elif use_date_filter:
+            assert col
+            try:
+                params = apply_send_now_to_chart_params(
+                    params,
+                    self._as_of_date,
+                    col,
+                    backend=backend,
+                )
+            except ValueError as ex:
+                logger.warning(
+                    "Send now: skip params date filter slice_id=%s: %s",
+                    chart.id,
+                    ex,
+                )
+        _sanitize_saved_dashboard_filters(params, col)
+        apply_send_now_template_params(params, template_params)
+        params["force"] = True
+
+        logger.info(
+            "Send now chart patched: slice_id=%s backend=%s date_column=%s "
+            "date_filter=%s date_template=%s adhoc_filters=%s url_params=%s",
+            chart.id,
+            backend,
+            col,
+            use_date_filter,
+            _chart_uses_date_template(chart),
+            params.get("adhoc_filters"),
+            params.get("url_params"),
+        )
+        return query_context, json.dumps(params)
+
     @contextmanager
     def _temporary_chart_query_context(self) -> Iterator[None]:
         """
-        Temporarily rewrite chart.query_context for Send now data pulls.
-        Restores the original context afterwards so cron stays unchanged.
+        Temporarily rewrite chart.query_context/params for Send now.
+        Restores the originals afterwards so cron stays unchanged.
         """
         chart = self._report_schedule.chart
         if not chart or not self._has_send_now_override():
             yield
             return
 
-        assert self._as_of_date and self._filter_date
         original_qc = chart.query_context
         original_params = chart.params
-        backend = _chart_db_backend(chart)
         try:
-            if not original_qc:
-                yield
-                return
-            qc_dict = json.loads(original_qc)
-            patched = apply_send_now_to_query_context(
-                qc_dict,
-                self._as_of_date,
-                self._filter_date,
-                backend=backend,
-            )
-            chart.query_context = json.dumps(patched)
-            try:
-                params = json.loads(original_params) if original_params else {}
-            except (TypeError, json.JSONDecodeError):
-                params = {}
-            if isinstance(params, dict):
-                form_data = patched.get("form_data") or {}
-                params["adhoc_filters"] = form_data.get("adhoc_filters", [])
-                if "time_range" in form_data:
-                    params["time_range"] = form_data.get("time_range")
-                else:
-                    params.pop("time_range", None)
-                if "granularity_sqla" in form_data:
-                    params["granularity_sqla"] = form_data.get("granularity_sqla")
-                else:
-                    params.pop("granularity_sqla", None)
-                params.pop("relative_start", None)
-                params.pop("relative_end", None)
-                chart.params = json.dumps(params)
+            chart.query_context, chart.params = self._send_now_patch_chart(chart)
             db.session.commit()
             logger.info(
                 "Send now override applied: report=%s as_of=%s filter_date=%s",
@@ -569,8 +915,8 @@ class BaseReportState:
     def _temporary_dashboard_charts_send_now(self) -> Iterator[None]:
         """
         Temporarily rewrite every dashboard chart's params/query_context so
-        Selenium screenshots honor Send now (permalink native filters alone
-        are not enough — charts load their own saved relative filters).
+        Selenium screenshots honor Send now (permalink state alone is not
+        enough — charts load their own saved filters and date params).
         Restores originals afterwards so scheduled runs stay unchanged.
         """
         dashboard = self._report_schedule.dashboard
@@ -578,90 +924,44 @@ class BaseReportState:
             yield
             return
 
-        assert self._as_of_date and self._filter_date
+        assert self._as_of_date
         slices = list(dashboard.slices or [])
+        date_columns = {
+            col for col in map(self._send_now_date_column, slices) if col
+        }
         originals: list[tuple[Any, Optional[str], Optional[str]]] = [
             (chart, chart.query_context, chart.params) for chart in slices
         ]
-        patched = 0
+        original_metadata = dashboard.json_metadata
         try:
+            # Native filters on the date column are cleared in the permalink
+            # dataMask (see _build_send_now_dashboard_state). A "required" filter
+            # (enableEmptyFilter) would turn that empty value into 1 = 0 and a
+            # defaultToFirstItem filter would pick another date, so relax both.
+            try:
+                metadata = json.loads(original_metadata or "{}")
+            except (TypeError, json.JSONDecodeError):
+                metadata = {}
+            date_filters = _native_filters_on_column(metadata, date_columns)
+            for native_filter in date_filters:
+                control_values = dict(native_filter.get("controlValues") or {})
+                control_values["enableEmptyFilter"] = False
+                control_values["defaultToFirstItem"] = False
+                native_filter["controlValues"] = control_values
+            if date_filters:
+                dashboard.json_metadata = json.dumps(metadata)
+
             for chart in slices:
-                backend = _chart_db_backend(chart)
-                form_data: Optional[dict[str, Any]] = None
-
-                if chart.query_context:
-                    try:
-                        qc_dict = json.loads(chart.query_context)
-                        if isinstance(qc_dict, dict):
-                            patched_qc = apply_send_now_to_query_context(
-                                qc_dict,
-                                self._as_of_date,
-                                self._filter_date,
-                                backend=backend,
-                            )
-                            chart.query_context = json.dumps(patched_qc)
-                            fd = patched_qc.get("form_data")
-                            if isinstance(fd, dict):
-                                form_data = fd
-                    except (TypeError, json.JSONDecodeError, ValueError) as ex:
-                        logger.warning(
-                            "Send now dashboard: skip query_context patch "
-                            "slice_id=%s: %s",
-                            chart.id,
-                            ex,
-                        )
-
-                try:
-                    params = json.loads(chart.params) if chart.params else {}
-                except (TypeError, json.JSONDecodeError):
-                    params = {}
-                if not isinstance(params, dict):
-                    params = {}
-
-                if form_data is not None:
-                    params["adhoc_filters"] = form_data.get("adhoc_filters", [])
-                    if "time_range" in form_data:
-                        params["time_range"] = form_data.get("time_range")
-                    else:
-                        params.pop("time_range", None)
-                    if "granularity_sqla" in form_data:
-                        params["granularity_sqla"] = form_data.get(
-                            "granularity_sqla"
-                        )
-                    else:
-                        params.pop("granularity_sqla", None)
-                    params.pop("relative_start", None)
-                    params.pop("relative_end", None)
-                else:
-                    try:
-                        params = apply_send_now_to_chart_params(
-                            params,
-                            self._as_of_date,
-                            self._filter_date,
-                            backend=backend,
-                        )
-                    except ValueError as ex:
-                        logger.warning(
-                            "Send now dashboard: skip params patch "
-                            "slice_id=%s: %s",
-                            chart.id,
-                            ex,
-                        )
-                        continue
-
-                params["force"] = True
-                chart.params = json.dumps(params)
-                patched += 1
+                chart.query_context, chart.params = self._send_now_patch_chart(chart)
 
             db.session.commit()
             logger.info(
                 "Send now dashboard charts patched: report=%s dashboard=%s "
-                "as_of=%s filter_date=%s charts=%s/%s",
+                "as_of=%s filter_date=%s charts=%s",
                 self._report_schedule.id,
                 dashboard.id,
                 self._as_of_date,
                 self._filter_date,
-                patched,
                 len(slices),
             )
             yield
@@ -669,6 +969,7 @@ class BaseReportState:
             for chart, original_qc, original_params in originals:
                 chart.query_context = original_qc
                 chart.params = original_params
+            dashboard.json_metadata = original_metadata
             db.session.commit()
 
     def update_report_schedule_and_log(
@@ -756,11 +1057,16 @@ class BaseReportState:
         Chart params are also temporarily patched in
         _temporary_dashboard_charts_send_now.
         """
-        assert self._as_of_date and self._filter_date
+        assert self._as_of_date
         dashboard = self._report_schedule.dashboard
         day = self._as_of_date[:10]
         time_range = _build_send_now_time_range(day)
-        col = self._filter_date.strip()
+        date_columns = {
+            col.casefold()
+            for col in map(self._send_now_date_column, dashboard.slices or [])
+            if col
+        }
+        col = ", ".join(sorted(date_columns))
 
         is_oracle = False
         try:
@@ -785,7 +1091,6 @@ class BaseReportState:
 
         native_filters = metadata.get("native_filter_configuration") or []
         matched = 0
-        oracle_where = _oracle_send_now_where(col, day) if is_oracle else None
 
         for native_filter in native_filters:
             if not isinstance(native_filter, dict):
@@ -815,7 +1120,11 @@ class BaseReportState:
                 matched += 1
                 continue
 
-            # Filters bound to the send-now date column
+            # Filters bound to the send-now date column (select/range/...).
+            # Their plugins rebuild extraFormData from filterState.value on
+            # mount, so a time-range string here becomes
+            # "col IN ('YYYY-MM-DD : YYYY-MM-DD')" and every chart shows
+            # No data. Clear them; the chart params patch applies the date.
             for target in targets:
                 if not isinstance(target, dict):
                     continue
@@ -823,45 +1132,13 @@ class BaseReportState:
                 if not isinstance(column, dict):
                     continue
                 col_name = column.get("name") or column.get("column_name") or ""
-                if col_name.casefold() != col.casefold():
+                if col_name.casefold() not in date_columns:
                     continue
-                if is_oracle and oracle_where:
-                    data_mask[filter_id] = {
-                        "id": filter_id,
-                        "extraFormData": {
-                            "adhoc_filters": [
-                                {
-                                    "clause": "WHERE",
-                                    "expressionType": "SQL",
-                                    "sqlExpression": oracle_where,
-                                    "filterOptionName": f"send_now_oracle_{col_name}",
-                                    "isExtra": True,
-                                }
-                            ],
-                        },
-                        "filterState": {
-                            "value": time_range,
-                            "label": time_range,
-                        },
-                    }
-                else:
-                    data_mask[filter_id] = {
-                        "id": filter_id,
-                        "extraFormData": {
-                            "filters": [
-                                {
-                                    "col": col_name,
-                                    "op": FilterOperator.TEMPORAL_RANGE.value,
-                                    "val": time_range,
-                                }
-                            ],
-                            "time_range": time_range,
-                        },
-                        "filterState": {
-                            "value": time_range,
-                            "label": time_range,
-                        },
-                    }
+                data_mask[filter_id] = {
+                    "id": filter_id,
+                    "extraFormData": {},
+                    "filterState": {"value": None},
+                }
                 matched += 1
                 break
 
@@ -892,11 +1169,38 @@ class BaseReportState:
                 matched,
                 is_oracle,
             )
+        # Full picture for debugging "No data": every native filter and the
+        # dataMask the screenshot browser will start from.
+        logger.info(
+            "Send now dashboard filters: report=%s native_filters=%s data_mask=%s",
+            self._report_schedule.id,
+            [
+                {
+                    "id": nf.get("id"),
+                    "type": nf.get("filterType"),
+                    "targets": nf.get("targets"),
+                    "controlValues": nf.get("controlValues"),
+                    "defaultDataMask": nf.get("defaultDataMask"),
+                }
+                for nf in native_filters
+                if isinstance(nf, dict)
+            ],
+            data_mask,
+        )
 
-        url_params = list(base_state.get("urlParams") or [])
+        # The dashboard time filter (plugin-chart-time-filter) reads its date
+        # from these URL params; when any is missing it resets to *today* and
+        # reloads, so the screenshot would ignore the Send now date. Datasets
+        # also read them via url_param().
+        template_params = build_send_now_template_params(day)
+        url_params = [
+            param
+            for param in base_state.get("urlParams") or []
+            if param and param[0] not in template_params and param[0] != "force"
+        ]
+        url_params.extend(template_params.items())
         # Ensure force refresh so screenshot isn't served from stale cache
-        if not any(param and param[0] == "force" for param in url_params):
-            url_params.append(("force", "true"))
+        url_params.append(("force", "true"))
 
         return {
             **base_state,
@@ -906,39 +1210,64 @@ class BaseReportState:
 
     def _get_dashboard_tab_paths(self) -> list[list[str]]:
         """
-        Tabs picked in the report config (extra.dashboard_tabs), each returned as
-        the activeTabs path needed to open it: parent tabs first, the tab last.
-        Tabs no longer on the dashboard are skipped; an empty list means the
-        dashboard is rendered as it opens by default.
+        One image per tab: the tabs picked in the report config
+        (extra.dashboard_tabs), or every tab of the dashboard when none is
+        picked. Each tab is returned as the activeTabs path needed to open it:
+        parent tabs first, the tab last. Nested tabs are captured through their
+        innermost tabs, since opening one also renders the content of the tabs
+        around it; picking a tab that has nested tabs captures all of them.
+        Picked tabs that no longer exist are ignored. An empty list means the
+        dashboard has no tabs and is rendered as it opens by default.
         """
         dashboard = self._report_schedule.dashboard
-        # Only one tab can be picked in the report config
-        tab_ids = ((self._report_schedule.extra or {}).get("dashboard_tabs") or [])[:1]
-        if not dashboard or not tab_ids:
+        if not dashboard:
             return []
         try:
             position = json.loads(dashboard.position_json or "{}")
         except (TypeError, json.JSONDecodeError):
             position = {}
+        if not isinstance(position, dict):
+            return []
+
+        def has_tab_below(node_id: str, seen: set[str]) -> bool:
+            node = position.get(node_id)
+            if not isinstance(node, dict) or node_id in seen:
+                return False
+            seen.add(node_id)
+            return any(
+                (position.get(child) or {}).get("type") == "TAB"
+                or has_tab_below(child, seen)
+                for child in node.get("children") or []
+            )
 
         paths: list[list[str]] = []
-        for tab_id in tab_ids:
-            component = position.get(tab_id)
-            if not isinstance(component, dict) or component.get("type") != "TAB":
-                logger.warning(
-                    "Report %s: tab %s not found on dashboard %s, skipping",
-                    self._report_schedule.id,
-                    tab_id,
-                    dashboard.id,
-                )
-                continue
-            parent_tabs = [
-                parent_id
-                for parent_id in component.get("parents") or []
-                if (position.get(parent_id) or {}).get("type") == "TAB"
-            ]
-            paths.append([*parent_tabs, tab_id])
-        return paths
+
+        def walk(node_id: str, tab_path: list[str], seen: set[str]) -> None:
+            node = position.get(node_id)
+            if not isinstance(node, dict) or node_id in seen:
+                return
+            seen = seen | {node_id}
+            if node.get("type") == "TAB":
+                tab_path = [*tab_path, node_id]
+                if not has_tab_below(node_id, set()):
+                    paths.append(tab_path)
+                    return
+            for child in node.get("children") or []:
+                walk(child, tab_path, seen)
+
+        walk("ROOT_ID", [], set())
+
+        picked = (self._report_schedule.extra or {}).get("dashboard_tabs") or []
+        selected = [path for path in paths if set(path) & set(picked)]
+        if picked and not selected:
+            logger.warning(
+                "Report %s: none of the tabs %s exist on dashboard %s, "
+                "capturing every tab",
+                self._report_schedule.id,
+                picked,
+                dashboard.id,
+            )
+        return selected or paths
 
     def _get_url(
         self,
@@ -964,6 +1293,13 @@ class BaseReportState:
                     type=ChartDataResultType.POST_PROCESSED.value,
                     force=force,
                 )
+            if self._has_send_now_override():
+                assert self._as_of_date
+                # Same date params the dashboard time filter puts in the URL
+                kwargs = {
+                    **build_send_now_template_params(self._as_of_date),
+                    **kwargs,
+                }
             return get_url_path(
                 "ExploreView.root",
                 user_friendly=user_friendly,
@@ -1680,17 +2016,48 @@ class AsyncExecuteReportScheduleCommand(BaseCommand):
                     self._execution_id,
                     username,
                 )
-                ReportScheduleStateMachine(
-                    self._execution_id,
-                    self._model,
-                    self._scheduled_dttm,
-                    as_of_date=self._as_of_date,
-                    filter_date=self._filter_date,
-                ).run()
+                try:
+                    ReportScheduleStateMachine(
+                        self._execution_id,
+                        self._model,
+                        self._scheduled_dttm,
+                        as_of_date=self._as_of_date,
+                        filter_date=self._filter_date,
+                    ).run()
+                finally:
+                    self._clear_send_now()
         except CommandException:
             raise
         except Exception as ex:
             raise ReportScheduleUnexpectedError(str(ex)) from ex
+
+    def _clear_send_now(self) -> None:
+        """
+        Send now is one-shot: once its execution finishes (sent or failed),
+        drop extra.send_now and restore force_screenshot so the report's
+        schedule runs as configured.
+        """
+        if not self._model:
+            return
+        extra = dict(self._model.extra or {})
+        send_now = extra.get("send_now") or {}
+        if str(send_now.get("task_id") or "") != str(self._execution_id):
+            return
+        extra.pop("send_now", None)
+        self._model.extra = extra
+        if "previous_force_screenshot" in send_now:
+            self._model.force_screenshot = bool(
+                send_now["previous_force_screenshot"]
+            )
+        try:
+            db.session.commit()  # pylint: disable=consider-using-transaction
+        except Exception:  # pylint: disable=broad-except
+            db.session.rollback()
+            logger.warning(
+                "Send now: could not clear extra.send_now for report %s",
+                self._model_id,
+                exc_info=True,
+            )
 
     def validate(self) -> None:
         # Validate/populate model exists

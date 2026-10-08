@@ -52,7 +52,6 @@ type FilterSummaryType = {
   updateComponents: Function;
   parentId: number;
   id: number;
-  freeGrid?: { width: number; height: number };
 };
 
 const DynamicComponent: FC<FilterSummaryType> = ({
@@ -71,7 +70,6 @@ const DynamicComponent: FC<FilterSummaryType> = ({
   parentId,
   updateComponents,
   id,
-  freeGrid,
 }) => {
   // inherit the size of parent columns
   const widthMultiple =
@@ -117,7 +115,6 @@ const DynamicComponent: FC<FilterSummaryType> = ({
       index={index}
       depth={depth}
       onDrop={handleComponentDrop}
-      disableDragDrop={!!freeGrid}
       editMode={editMode}
     >
       {({ dragSourceRef }) => (
@@ -142,7 +139,7 @@ const DynamicComponent: FC<FilterSummaryType> = ({
           >
             <ResizableContainer
               id={component.id}
-              adjustableWidth={!freeGrid && parentComponent.type === ROW_TYPE}
+              adjustableWidth={parentComponent.type === ROW_TYPE}
               widthStep={columnWidth}
               widthMultiple={widthMultiple}
               heightStep={GRID_BASE_UNIT}

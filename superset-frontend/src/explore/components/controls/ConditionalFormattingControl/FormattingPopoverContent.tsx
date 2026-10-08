@@ -245,23 +245,19 @@ export const FormattingPopoverContent = ({
     );
   };
 
-  // Top N / Bottom N use a fixed color (green / red): set it automatically
-  // and lock the color picker while one of these operators is selected.
+  // Top N / Bottom N suggest a default color (green / red) when selected,
+  // the user can still pick any other color afterwards.
   const [form] = AntdForm.useForm();
-  const [isColorLocked, setIsColorLocked] = useState(
-    isOperatorTopN(config?.operator),
-  );
   const handleValuesChange = (
     changedValues: Partial<ConditionalFormattingConfig>,
   ) => {
     if (!('operator' in changedValues)) return;
     const { operator } = changedValues;
     if (operator === Comparator.TopN) {
-      form.setFieldsValue({ colorScheme: theme.colors.success.dark1 });
+      form.setFieldsValue({ colorScheme: theme.colors.success.light1 });
     } else if (operator === Comparator.BottomN) {
-      form.setFieldsValue({ colorScheme: theme.colors.error.dark1 });
+      form.setFieldsValue({ colorScheme: theme.colors.error.light1 });
     }
-    setIsColorLocked(isOperatorTopN(operator));
   };
 
   return (
@@ -292,7 +288,6 @@ export const FormattingPopoverContent = ({
             initialValue={colorScheme[0].value}
           >
             <Select
-              disabled={isColorLocked}
               onChange={event => handleChange(event)}
               ariaLabel={t('Color scheme')}
               options={[...colorScheme, ...extraColorChoices]}
