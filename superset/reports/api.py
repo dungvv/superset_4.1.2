@@ -73,6 +73,10 @@ def _validate_filter_date_column(
     """
     column_name = (filter_date or "").strip()
     if not column_name:
+        # Dashboards pick each chart's date column from its dataset
+        # ("Default datetime"), so the column is optional there.
+        if report.dashboard and not report.chart:
+            return None
         return "filter_date is required"
 
     datasources: list[Any] = []
@@ -698,8 +702,13 @@ class ReportScheduleRestApi(BaseSupersetModelRestApi):
 
             try:
                 # Persist send-now context for auditing / future filter injection
+                # The task id ties this send-now context to this one execution;
+                # scheduled runs (other task ids) ignore it.
+                send_now_task_id = str(uuid4())
                 extra = dict(report.extra or {})
                 extra["send_now"] = {
+                    "task_id": send_now_task_id,
+                    "previous_force_screenshot": bool(report.force_screenshot),
                     "as_of_date": as_of_date,
                     "filter_date": (
                         filter_date.strip()
@@ -735,7 +744,9 @@ class ReportScheduleRestApi(BaseSupersetModelRestApi):
                 # Only pass report_id. as_of_date/filter_date are already persisted
                 # on report.extra["send_now"] and read by the worker (avoids signature
                 # mismatch when an older reports.execute task is still registered).
-                task = execute_task.apply_async((report_id,), **async_options)
+                task = execute_task.apply_async(
+                    (report_id,), task_id=send_now_task_id, **async_options
+                )
                 queued.append(
                     {
                         "id": report_id,

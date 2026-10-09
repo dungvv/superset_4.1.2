@@ -68,8 +68,6 @@ interface ChartHolderProps {
   handleComponentDrop: (...args: unknown[]) => unknown;
   setFullSizeChartId: (chartId: number | null) => void;
   isInView: boolean;
-  // pixel size of the cell when rendered inside the free grid
-  freeGrid?: { width: number; height: number };
 }
 
 const ChartHolder: React.FC<ChartHolderProps> = ({
@@ -94,7 +92,6 @@ const ChartHolder: React.FC<ChartHolderProps> = ({
   handleComponentDrop,
   setFullSizeChartId,
   isInView,
-  freeGrid,
 }) => {
   const theme = useTheme();
   const fullSizeStyle = css`
@@ -200,9 +197,6 @@ const ChartHolder: React.FC<ChartHolderProps> = ({
     if (isFullSize) {
       chartWidth = window.innerWidth - CHART_MARGIN;
       chartHeight = window.innerHeight - CHART_MARGIN;
-    } else if (freeGrid) {
-      chartWidth = Math.floor(freeGrid.width - CHART_MARGIN);
-      chartHeight = Math.floor(freeGrid.height - CHART_MARGIN);
     } else {
       chartWidth = Math.floor(
         widthMultiple * columnWidth +
@@ -218,7 +212,7 @@ const ChartHolder: React.FC<ChartHolderProps> = ({
       chartWidth,
       chartHeight,
     };
-  }, [columnWidth, component, freeGrid, isFullSize, widthMultiple]);
+  }, [columnWidth, component, isFullSize, widthMultiple]);
 
   const handleDeleteComponent = useCallback(() => {
     deleteComponent(id, parentId);
@@ -258,14 +252,14 @@ const ChartHolder: React.FC<ChartHolderProps> = ({
       index={index}
       depth={depth}
       onDrop={handleComponentDrop}
-      disableDragDrop={!!freeGrid}
+      disableDragDrop={false}
       editMode={editMode}
     >
       {({ dragSourceRef }) => (
         <ResizableContainer
           id={component.id}
-          adjustableWidth={!freeGrid && parentComponent.type === ROW_TYPE}
-          adjustableHeight={!freeGrid}
+          adjustableWidth={parentComponent.type === ROW_TYPE}
+          adjustableHeight
           widthStep={columnWidth}
           widthMultiple={widthMultiple}
           heightStep={GRID_BASE_UNIT}

@@ -34,7 +34,6 @@ export enum FeatureFlag {
   DashboardCrossFilters = 'DASHBOARD_CROSS_FILTERS',
   DashboardVirtualization = 'DASHBOARD_VIRTUALIZATION',
   DashboardRbac = 'DASHBOARD_RBAC',
-  DashboardFreeGrid = 'DASHBOARD_FREE_GRID',
   DatapanelClosedByDefault = 'DATAPANEL_CLOSED_BY_DEFAULT',
   DisableLegacyDatasourceEditor = 'DISABLE_LEGACY_DATASOURCE_EDITOR',
   DrillToDetail = 'DRILL_TO_DETAIL',

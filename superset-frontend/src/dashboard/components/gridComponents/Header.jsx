@@ -39,10 +39,6 @@ import {
 } from 'src/dashboard/util/constants';
 
 const propTypes = {
-  freeGrid: PropTypes.shape({
-    width: PropTypes.number,
-    height: PropTypes.number,
-  }),
   id: PropTypes.string.isRequired,
   dashboardId: PropTypes.string.isRequired,
   parentId: PropTypes.string.isRequired,
@@ -191,7 +187,7 @@ class Header extends PureComponent {
         index={index}
         depth={depth}
         onDrop={handleComponentDrop}
-        disableDragDrop={isFocused || !!this.props.freeGrid}
+        disableDragDrop={isFocused}
         editMode={editMode}
       >
         {({ dragSourceRef }) => (

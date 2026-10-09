@@ -26,10 +26,6 @@ import DeleteComponentButton from '../DeleteComponentButton';
 import { componentShape } from '../../util/propShapes';
 
 const propTypes = {
-  freeGrid: PropTypes.shape({
-    width: PropTypes.number,
-    height: PropTypes.number,
-  }),
   id: PropTypes.string.isRequired,
   parentId: PropTypes.string.isRequired,
   component: componentShape.isRequired,
@@ -95,7 +91,6 @@ class Divider extends PureComponent {
         index={index}
         depth={depth}
         onDrop={handleComponentDrop}
-        disableDragDrop={!!this.props.freeGrid}
         editMode={editMode}
       >
         {({ dragSourceRef }) => (

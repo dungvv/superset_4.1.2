@@ -622,3 +622,50 @@ test('removes notification method on clicking trash can', async () => {
     screen.getAllByRole('combobox', { name: /delivery method/i }).length,
   ).toBe(1);
 });
+
+test('lists the dashboard tabs as they are now and drops saved tabs that were deleted', async () => {
+  fetchMock.get(
+    FETCH_DASHBOARD_ENDPOINT,
+    {
+      result: {
+        ...generateMockPayload(true),
+        extra: { dashboard_tabs: ['TAB-1', 'TAB-gone'] },
+      },
+    },
+    { overwriteRoutes: true },
+  );
+  fetchMock.get('glob:*/api/v1/dashboard/1/tabs', {
+    result: {
+      tab_tree: [
+        { value: 'TAB-1', title: 'Renamed tab' },
+        {
+          value: 'TAB-2',
+          title: 'Parent',
+          children: [{ value: 'TAB-3', title: 'Child' }],
+        },
+      ],
+    },
+  });
+  render(<AlertReportModal {...generateMockedProps(false, true, true)} />, {
+    useRedux: true,
+  });
+  userEvent.click(screen.getByTestId('contents-panel'));
+
+  // the renamed tab shows its current name, the deleted one is gone
+  expect(await screen.findByText('Renamed tab')).toBeInTheDocument();
+  expect(screen.queryByText('TAB-gone')).not.toBeInTheDocument();
+  expect(
+    await screen.findByText(/1 saved tab\(s\) no longer exist/i),
+  ).toBeInTheDocument();
+
+  // nested tabs are offered through their innermost tab, labelled by path
+  userEvent.click(screen.getByRole('combobox', { name: /select tabs/i }));
+  expect(await screen.findByText('Parent › Child')).toBeInTheDocument();
+  expect(screen.queryByTitle('Parent')).not.toBeInTheDocument();
+
+  fetchMock.get(
+    FETCH_DASHBOARD_ENDPOINT,
+    { result: generateMockPayload(true) },
+    { overwriteRoutes: true },
+  );
+});
