@@ -201,9 +201,9 @@ export default function KpiLineChart(props: KpiLineVizProps) {
   const formatKpiValue = (value: number | null) =>
     value !== null
       ? `${value.toLocaleString('vi-VN', {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        })}${bigNumberUnit}`
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })}${bigNumberUnit}`
       : 'N/A';
 
   useEffect(() => {
@@ -274,10 +274,8 @@ export default function KpiLineChart(props: KpiLineVizProps) {
     if (comparison.direction === 'none') {
       return (
         <ComparisonLine>
-          {comparison.isGood && (
-            <UnchangedSuccessArrow aria-hidden="true">▶</UnchangedSuccessArrow>
-          )}
-          {prefix}Không đổi so với {targetLabel}
+          <UnchangedSuccessArrow aria-hidden="true">▶</UnchangedSuccessArrow>
+          {prefix} Không đổi so với {targetLabel}
           {formattedTargetValue}
         </ComparisonLine>
       );

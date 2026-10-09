@@ -25,10 +25,15 @@ function getComparison(
   if (current === null || target === null) {
     return { direction: 'none', value: 0, noData: true };
   }
-  const diff = Number((current - target).toFixed(2));
-  // (unchanged: internal, not displayed)
+  const roundedCurrent = Number(current.toFixed(2));
+  const roundedTarget = Number(target.toFixed(2));
+  const diff = Number((roundedCurrent - roundedTarget).toFixed(2));
+
+  // Keep the goal evaluation consistent with the displayed two-decimal value.
   const isGood =
-    goalDirection === 'less_than' ? current <= target : current >= target;
+    goalDirection === 'less_than'
+      ? roundedCurrent <= roundedTarget
+      : roundedCurrent >= roundedTarget;
 
   return {
     direction: diff > 0 ? 'up' : diff < 0 ? 'down' : 'none',
@@ -235,13 +240,17 @@ export default function transformProps(
     kpiTitle = '',
     detailUrl = '',
     kpiGroup = 'none',
-    kpiGoalDirection = 'greater_than',
+    kpi_goal_direction: kpiGoalDirectionSnake,
+    kpiGoalDirection: kpiGoalDirectionCamel,
     bigNumberUnit = '',
     xAxisTitle = '',
     zoomable = false,
     yAxisFormat,
     currencyFormat,
   } = formData;
+
+  const kpiGoalDirection =
+    kpiGoalDirectionSnake || kpiGoalDirectionCamel || 'greater_than';
 
   const { data = [], colnames = [] } = queriesData[0] || {};
 

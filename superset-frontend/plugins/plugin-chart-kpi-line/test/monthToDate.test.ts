@@ -163,6 +163,19 @@ test('a difference invisible at 2dp counts as unchanged', () => {
   expect(almost.kpiComparison.direction).toBe('none');
 });
 
+test('3-metric unchanged comparison is good after display rounding', () => {
+  const props = build(
+    [
+      { ds: 'summary', kpi: 90, cur: 89.996, prev: 90 },
+      { ds: 'MTD', kpi: 90, cur: 90, prev: 90 },
+    ],
+    ['ds', 'kpi', 'cur', 'prev'],
+  );
+
+  expect(props.prevPeriodComparison.direction).toBe('none');
+  expect(props.prevPeriodComparison.isGood).toBe(true);
+});
+
 test('line value labels follow X-axis interval, last point always shown', () => {
   const labelAt = (pointCount: number, dataIndex: number) => {
     const props = build([

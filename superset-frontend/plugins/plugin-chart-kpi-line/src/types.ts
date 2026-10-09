@@ -18,6 +18,7 @@ export type KpiLineFormData = QueryFormData & {
   kpi_group?: 'none' | 'common' | 'key' | 'main' | 'addon';
   kpiGroup?: 'none' | 'common' | 'key' | 'main' | 'addon';
   kpi_goal_direction?: 'greater_than' | 'less_than';
+  kpiGoalDirection?: 'greater_than' | 'less_than';
   big_number_unit?: string;
   x_axis_title?: string;
   y_axis_title?: string;
