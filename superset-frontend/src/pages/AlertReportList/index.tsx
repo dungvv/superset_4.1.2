@@ -243,12 +243,15 @@ function AlertList({
       }
       if (queued) {
         addSuccessToast(
-          t(
-            'Queued %s %s to send for %s',
-            queued,
-            titlePlural,
-            payload.as_of_date,
-          ),
+          result.batch_size && queued > result.batch_size
+            ? t(
+                'Queued %s %s to send now, %s at a time every %s seconds',
+                queued,
+                titlePlural,
+                result.batch_size,
+                result.stagger_seconds,
+              )
+            : t('Queued %s %s to send now', queued, titlePlural),
         );
       }
       if (skipped) {
@@ -428,6 +431,7 @@ function AlertList({
           const history = useHistory();
           const handleEdit = () => handleAlertEdit(original);
           const handleDelete = () => setCurrentAlertDeleting(original);
+          const handleSendNow = () => handleBulkSendNow([original]);
           const handleGotoExecutionLog = () =>
             history.push(`/${original.type.toLowerCase()}/${original.id}/log`);
 
@@ -452,6 +456,15 @@ function AlertList({
                   placement: 'bottom',
                   icon: allowEdit ? 'Edit' : 'Binoculars',
                   onClick: handleEdit,
+                }
+              : null,
+            allowEdit && canEdit
+              ? {
+                  label: 'send-now-action',
+                  tooltip: t('Send now'),
+                  placement: 'bottom',
+                  icon: 'Email',
+                  onClick: handleSendNow,
                 }
               : null,
             allowEdit && canDelete

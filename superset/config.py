@@ -1486,7 +1486,11 @@ ALERT_MINIMUM_INTERVAL = int(timedelta(minutes=0).total_seconds())
 REPORT_MINIMUM_INTERVAL = int(timedelta(minutes=0).total_seconds())
 
 # Max reports / stagger for Send now bulk execute
-ALERT_REPORTS_SEND_NOW_MAX_BATCH = 10
+# Send now: any number of reports can be selected. They are queued in waves of
+# BATCH_SIZE reports, STAGGER_SECONDS apart (keep BATCH_SIZE <= the concurrency of
+# the reports worker). MAX_BATCH > 0 caps one request, 0 means no cap.
+ALERT_REPORTS_SEND_NOW_MAX_BATCH = 0
+ALERT_REPORTS_SEND_NOW_BATCH_SIZE = 4
 ALERT_REPORTS_SEND_NOW_STAGGER_SECONDS = 15
 
 # A custom prefix to use on all Alerts & Reports emails

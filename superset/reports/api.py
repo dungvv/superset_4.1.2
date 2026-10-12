@@ -586,6 +586,10 @@ class ReportScheduleRestApi(BaseSupersetModelRestApi):
     )
     def execute(self) -> Response:
         """Queue one or more report schedules for immediate execution.
+
+        Without as_of_date the report runs exactly as its schedule would (same
+        saved configuration, same state machine, same recipients), just now.
+        With as_of_date it runs as a "Send now for a date" (legacy behaviour).
         ---
         post:
           summary: Execute report schedules now
@@ -596,12 +600,12 @@ class ReportScheduleRestApi(BaseSupersetModelRestApi):
                 schema:
                   type: object
                   required:
-                    - as_of_date
                     - items
                   properties:
                     as_of_date:
                       type: string
                       format: date
+                      description: Optional, run the report for this day
                     items:
                       type: array
                       items:
@@ -636,26 +640,37 @@ class ReportScheduleRestApi(BaseSupersetModelRestApi):
             return self.response_400(message="items is required")
         if not isinstance(items, list):
             return self.response_400(message="items must be a list")
-        if not isinstance(as_of_date, str) or not as_of_date.strip():
-            return self.response_400(message="as_of_date is required")
-        as_of_date = as_of_date.strip()
-        try:
-            if datetime.strptime(as_of_date, "%Y-%m-%d").strftime(
-                "%Y-%m-%d"
-            ) != as_of_date:
-                raise ValueError
-        except ValueError:
-            return self.response_400(
-                message="as_of_date must be a valid date in YYYY-MM-DD format"
-            )
+        # as_of_date is optional: without it the report simply runs now, as
+        # scheduled, and nothing of the report is rewritten.
+        if isinstance(as_of_date, str):
+            as_of_date = as_of_date.strip() or None
+        if as_of_date is not None:
+            if not isinstance(as_of_date, str):
+                return self.response_400(message="as_of_date must be a string")
+            try:
+                if datetime.strptime(as_of_date, "%Y-%m-%d").strftime(
+                    "%Y-%m-%d"
+                ) != as_of_date:
+                    raise ValueError
+            except ValueError:
+                return self.response_400(
+                    message="as_of_date must be a valid date in YYYY-MM-DD format"
+                )
 
+        # No cap by default: a large selection is split into waves of
+        # batch_size reports, stagger_seconds apart, so the workers (and the
+        # database / browser behind them) are not hit all at once.
+        # ALERT_REPORTS_SEND_NOW_MAX_BATCH > 0 still caps one request.
         max_batch = int(
-            current_app.config.get("ALERT_REPORTS_SEND_NOW_MAX_BATCH", 10)
+            current_app.config.get("ALERT_REPORTS_SEND_NOW_MAX_BATCH", 0) or 0
+        )
+        batch_size = max(
+            1, int(current_app.config.get("ALERT_REPORTS_SEND_NOW_BATCH_SIZE", 4))
         )
         stagger_seconds = int(
             current_app.config.get("ALERT_REPORTS_SEND_NOW_STAGGER_SECONDS", 15)
         )
-        if len(items) > max_batch:
+        if max_batch and len(items) > max_batch:
             return self.response_400(
                 message=(
                     f"Too many reports selected. "
@@ -695,37 +710,44 @@ class ReportScheduleRestApi(BaseSupersetModelRestApi):
                 skipped.append({"id": report_id, "reason": "Already working"})
                 continue
 
-            filter_date_error = _validate_filter_date_column(report, filter_date)
-            if filter_date_error:
-                errors.append({"id": report_id, "reason": filter_date_error})
-                continue
+            if as_of_date:
+                filter_date_error = _validate_filter_date_column(
+                    report, filter_date
+                )
+                if filter_date_error:
+                    errors.append({"id": report_id, "reason": filter_date_error})
+                    continue
 
             try:
-                # Persist send-now context for auditing / future filter injection
-                # The task id ties this send-now context to this one execution;
-                # scheduled runs (other task ids) ignore it.
                 send_now_task_id = str(uuid4())
-                extra = dict(report.extra or {})
-                extra["send_now"] = {
-                    "task_id": send_now_task_id,
-                    "previous_force_screenshot": bool(report.force_screenshot),
-                    "as_of_date": as_of_date,
-                    "filter_date": (
-                        filter_date.strip()
-                        if isinstance(filter_date, str)
-                        else filter_date
-                    ),
-                    "requested_at": datetime.utcnow().isoformat(),
-                }
-                report.extra = extra
-                report.force_screenshot = True
-                db.session.commit()
+                if as_of_date:
+                    # Persist send-now context for the worker. The task id ties
+                    # it to this one execution; scheduled runs (other task ids)
+                    # ignore it.
+                    extra = dict(report.extra or {})
+                    extra["send_now"] = {
+                        "task_id": send_now_task_id,
+                        "previous_force_screenshot": bool(report.force_screenshot),
+                        "as_of_date": as_of_date,
+                        "filter_date": (
+                            filter_date.strip()
+                            if isinstance(filter_date, str)
+                            else filter_date
+                        ),
+                        "requested_at": datetime.utcnow().isoformat(),
+                    }
+                    report.extra = extra
+                    report.force_screenshot = True
+                    db.session.commit()
 
-                # Stagger via relative countdown (safer than absolute eta when
+                # Wave number: reports of the same wave start together, the
+                # next wave starts stagger_seconds later. Relative countdown is
+                # safer than an absolute eta when worker clocks drift.
+                countdown = (index // batch_size) * stagger_seconds
                 # worker clocks drift). scheduled_dttm fallback lives in
                 # tasks/scheduler.py because request.eta is None after countdown.
                 async_options: dict[str, Any] = {
-                    "countdown": index * stagger_seconds,
+                    "countdown": countdown,
                 }
                 if (
                     report.working_timeout is not None
@@ -752,7 +774,7 @@ class ReportScheduleRestApi(BaseSupersetModelRestApi):
                         "id": report_id,
                         "task_id": task.id or str(uuid4()),
                         "name": report.name,
-                        "countdown": index * stagger_seconds,
+                        "countdown": countdown,
                     }
                 )
             except Exception as ex:  # pylint: disable=broad-except
@@ -768,6 +790,7 @@ class ReportScheduleRestApi(BaseSupersetModelRestApi):
                 "errors": errors,
                 "as_of_date": as_of_date,
                 "stagger_seconds": stagger_seconds,
+                "batch_size": batch_size,
                 "max_batch": max_batch,
             },
         )

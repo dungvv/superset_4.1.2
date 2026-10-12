@@ -654,6 +654,10 @@ class QueryContextProcessor:
 
         file_name = "Bug nè - Ở file superset/common/query_conext_processor.py - Fix thôi :v"
 
+        # Dòng mô tả ghi trong file Excel: luôn là tên công ty, không lấy
+        # description của chart
+        desciption = "STAR FINTECH SOLE CO.,LTD"
+
         # Kiểm tra sự tồn tại của key "slice_id" trong form_data
         form_data = self._query_context.form_data
         slice_id = form_data.get("slice_id", None)
@@ -663,7 +667,6 @@ class QueryContextProcessor:
         if slice_id:
             slice_obj = db.session.query(Slice).filter_by(id=slice_id).first()
             file_name = slice_obj.slice_name if slice_obj.slice_name else "Thuộc tính Slice_Obj không có giá trị Slice_Name"
-            desciption = slice_obj.description if slice_obj.description else "Chart không có Description - Edit --> Basic Information --> Description"
 
         # Ghi log để kiểm tra tên biểu đồ
         print(f"Processing data for chart: \n {file_name}")  
