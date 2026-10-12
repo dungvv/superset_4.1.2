@@ -21,6 +21,7 @@ from copy import deepcopy
 from datetime import date, datetime, timedelta
 from typing import Any, Iterator, Optional, Union
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 from celery.exceptions import SoftTimeLimitExceeded
@@ -78,7 +79,7 @@ from superset.utils import json
 from superset.utils.core import FilterOperator, HeaderDataType, override_user
 from superset.utils.csv import get_chart_csv_data, get_chart_dataframe
 from superset.utils.decorators import logs_context, transaction
-from superset.utils.pdf import build_pdf_from_screenshots
+from superset.utils.pdf import build_pdf_from_screenshots, get_pdf_decorations
 from superset.utils.screenshots import ChartScreenshot, DashboardScreenshot
 from superset.utils.slack import get_channels_with_search, SlackChannelTypes
 from superset.utils.urls import get_url_path
@@ -1427,15 +1428,36 @@ class BaseReportState:
                     images.append(image)
                 return images
 
-    def _get_pdf(self) -> bytes:
+    def _get_pdf(self, screenshots: Optional[list[bytes]] = None) -> bytes:
         """
-        Get chart or dashboard pdf
+        Get chart or dashboard pdf, built from the given screenshots (taken
+        here when not given)
         :raises: ReportSchedulePdfFailedError
         """
-        screenshots = self._get_screenshots()
-        pdf = build_pdf_from_screenshots(screenshots)
+        if screenshots is None:
+            screenshots = self._get_screenshots()
+        pdf = build_pdf_from_screenshots(
+            screenshots,
+            decorations=get_pdf_decorations(app.config, self._pdf_title_lines()),
+            pixel_density=app.config["WEBDRIVER_WINDOW"].get("pixel_density", 1),
+        )
 
         return pdf
+
+    def _pdf_title_lines(self) -> list[str]:
+        """
+        Header of the PDF: the report's name, then the day the report is
+        generated (in the report's timezone), formatted with
+        ALERT_REPORTS_PDF_DATE_FORMAT.
+        """
+        try:
+            now = datetime.now(ZoneInfo(self._report_schedule.timezone))
+        except Exception:  # pylint: disable=broad-except
+            now = datetime.now()
+        return [
+            (self._report_schedule.name or "").strip(),
+            now.strftime(app.config.get("ALERT_REPORTS_PDF_DATE_FORMAT", "%d/%m/%Y")),
+        ]
 
     def _get_csv_data(self) -> bytes:
         if self._has_send_now_override() and self._report_schedule.chart:
@@ -1617,7 +1639,13 @@ class BaseReportState:
                 if not screenshot_data:
                     error_text = "Unexpected missing screenshot"
             elif self._report_schedule.report_format == ReportDataFormat.PDF:
-                pdf_data = self._get_pdf()
+                if app.config.get("ALERT_REPORTS_PDF_INLINE_IMAGES"):
+                    # the email shows the pages too, not only the attachment;
+                    # the screenshots are taken once and used for both
+                    screenshot_data = self._get_screenshots()
+                    pdf_data = self._get_pdf(screenshot_data)
+                else:
+                    pdf_data = self._get_pdf()
                 if not pdf_data:
                     error_text = "Unexpected missing pdf"
             elif (

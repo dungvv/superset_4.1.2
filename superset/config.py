@@ -1412,6 +1412,30 @@ DBS_AVAILABLE_DENYLIST: dict[str, set[str]] = {}
 # custom auth mechanisms
 MACHINE_AUTH_PROVIDER_CLASS = "superset.utils.machine_auth.MachineAuthProvider"
 
+# Images added to every page of report PDFs (not the dashboard "Download as PDF").
+# Header and footer are scaled to the page width and placed above / below each
+# page; the logo is drawn on the header (on a white band when there is no header
+# image). Paths are read by the Celery worker, so they must exist in its
+# container. A missing or unreadable image is skipped with a warning.
+ALERT_REPORTS_PDF_HEADER_IMAGE: str | None = None
+ALERT_REPORTS_PDF_FOOTER_IMAGE: str | None = None
+ALERT_REPORTS_PDF_LOGO: str | None = None
+ALERT_REPORTS_PDF_LOGO_POSITION = "left"  # left | center | right
+# Title of the PDF header: the report's name, then the day it is generated.
+# The date is formatted with strftime, e.g. "Ngày %d/%m/%Y".
+ALERT_REPORTS_PDF_SHOW_TITLE = False
+ALERT_REPORTS_PDF_DATE_FORMAT = "%d/%m/%Y"
+# TrueType font of the title; it must have the characters of the report names
+# (Vietnamese, ...). Falls back to DejaVu Sans / Liberation Sans / Noto Sans.
+ALERT_REPORTS_PDF_FONT: str | None = None
+# Page number at the bottom of every page, "{page}" and "{pages}" are replaced
+# (e.g. "Trang {page}/{pages}"). Drawn with ALERT_REPORTS_PDF_FONT.
+ALERT_REPORTS_PDF_PAGE_NUMBER = False
+ALERT_REPORTS_PDF_PAGE_FORMAT = "Trang {page}"
+# Also show the pages of a PDF report in the body of the email (one image per
+# page), next to the PDF attachment. Makes the email heavier.
+ALERT_REPORTS_PDF_INLINE_IMAGES = False
+
 # ---------------------------------------------------
 # Alerts & Reports
 # ---------------------------------------------------
