@@ -1428,10 +1428,14 @@ ALERT_REPORTS_PDF_DATE_FORMAT = "%d/%m/%Y"
 # TrueType font of the title; it must have the characters of the report names
 # (Vietnamese, ...). Falls back to DejaVu Sans / Liberation Sans / Noto Sans.
 ALERT_REPORTS_PDF_FONT: str | None = None
+# Font of the date line and the page number (regular weight); falls back to
+# ALERT_REPORTS_PDF_FONT.
+ALERT_REPORTS_PDF_FONT_REGULAR: str | None = None
 # Page number at the bottom of every page, "{page}" and "{pages}" are replaced
 # (e.g. "Trang {page}/{pages}"). Drawn with ALERT_REPORTS_PDF_FONT.
 ALERT_REPORTS_PDF_PAGE_NUMBER = False
 ALERT_REPORTS_PDF_PAGE_FORMAT = "Trang {page}"
+ALERT_REPORTS_PDF_PAGE_POSITION = "center"  # left | center | right
 # Also show the pages of a PDF report in the body of the email (one image per
 # page), next to the PDF attachment. Makes the email heavier.
 ALERT_REPORTS_PDF_INLINE_IMAGES = False
