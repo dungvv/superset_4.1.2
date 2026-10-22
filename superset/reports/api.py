@@ -212,9 +212,16 @@ class ReportScheduleRestApi(BaseSupersetModelRestApi):
         "owners.id",
         "owners.last_name",
         "recipients.id",
+        "recipients.recipient_config_json",
         "recipients.type",
         "timezone",
         "type",
+    ]
+    # Slice.datasource_* are needed to load the chart relation on the list
+    list_select_columns = list_columns + [
+        "chart.datasource_id",
+        "chart.datasource_type",
+        "chart.datasource_name",
     ]
     add_columns = [
         "active",
