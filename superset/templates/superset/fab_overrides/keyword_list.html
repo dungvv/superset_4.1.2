@@ -25,8 +25,29 @@
     <style nonce="{{ macros.get_nonce() }}">
         .keyword-filter {
             display: inline-block;
-            width: 200px;
             margin-bottom: 16px;
+        }
+        .keyword-filter .keyword-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .keyword-filter .keyword-input {
+            width: 260px;
+        }
+        .keyword-filter .keyword-submit {
+            height: 32px;
+            padding: 0 16px;
+            font-size: 14px;
+            color: #fff;
+            background: #20a7c9;
+            border: 1px solid #20a7c9;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .keyword-filter .keyword-submit:hover {
+            background: #1a85a0;
+            border-color: #1a85a0;
         }
         .keyword-filter label {
             display: block;
@@ -85,11 +106,14 @@
     </style>
     <form id="keyword-filter-form" class="keyword-filter" method="get" action="{{ request.path }}">
         <label for="keyword-filter-input">{{ keyword_label }}</label>
-        <div class="keyword-input{% if keyword %} has-value{% endif %}">
-            <i class="fa fa-search keyword-icon" aria-hidden="true"></i>
-            <input id="keyword-filter-input" type="text" name="q" value="{{ keyword }}"
-                   placeholder="{{ keyword_placeholder }}" autocomplete="off">
-            <i class="fa fa-times-circle keyword-clear" role="button" aria-label="{{ _('Clear') }}"></i>
+        <div class="keyword-row">
+            <div class="keyword-input{% if keyword %} has-value{% endif %}">
+                <i class="fa fa-search keyword-icon" aria-hidden="true"></i>
+                <input id="keyword-filter-input" type="text" name="q" value="{{ keyword }}"
+                       placeholder="{{ keyword_placeholder }}" autocomplete="off">
+                <i class="fa fa-times-circle keyword-clear" role="button" aria-label="{{ _('Clear') }}"></i>
+            </div>
+            <button type="submit" class="keyword-submit">{{ _('Search') }}</button>
         </div>
     </form>
     <script nonce="{{ macros.get_nonce() }}">
@@ -113,12 +137,6 @@
             form.addEventListener('submit', function (event) {
                 event.preventDefault();
                 submit(input.value.trim());
-            });
-            input.addEventListener('blur', function () {
-                var value = input.value.trim();
-                if (value) {
-                    submit(value);
-                }
             });
             input.addEventListener('input', function () {
                 wrapper.classList.toggle('has-value', input.value !== '');

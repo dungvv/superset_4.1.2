@@ -16,7 +16,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { styled, t } from '@superset-ui/core';
+import { useEffect, useState } from 'react';
+import { styled, SupersetClient, t } from '@superset-ui/core';
 import Modal from 'src/components/Modal';
 import { AlertObject } from '../types';
 
@@ -52,7 +53,7 @@ const StyledForm = styled.div`
     .reports-header,
     .report-row {
       display: grid;
-      grid-template-columns: minmax(0, 1.4fr) 110px minmax(0, 1.6fr);
+      grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.6fr) minmax(0, 1.2fr);
       column-gap: ${theme.gridUnit * 3}px;
       align-items: center;
       padding: ${theme.gridUnit * 2}px ${theme.gridUnit * 3}px;
@@ -95,8 +96,47 @@ const StyledForm = styled.div`
   `}
 `;
 
+type TabNode = { value: string; title: string; children?: TabNode[] };
+
+// Innermost tabs only, labelled with their path (same as the report form)
+const flattenTabs = (
+  nodes: TabNode[],
+  parentLabel = '',
+): { value: string; label: string }[] =>
+  nodes.flatMap(node => {
+    const label = parentLabel ? `${parentLabel} › ${node.title}` : node.title;
+    return node.children?.length
+      ? flattenTabs(node.children, label)
+      : [{ value: node.value, label }];
+  });
+
+const getDashboardId = (report: AlertObject): number | undefined => {
+  const id =
+    report.dashboard_id ?? report.dashboard?.id ?? report.dashboard?.value;
+  return id ? Number(id) : undefined;
+};
+
+const getPickedTabs = (report: AlertObject): string[] => {
+  let extra: any = report.extra;
+  if (typeof extra === 'string') {
+    try {
+      extra = JSON.parse(extra);
+    } catch {
+      extra = {};
+    }
+  }
+  return Array.isArray(extra?.dashboard_tabs) ? extra.dashboard_tabs : [];
+};
+
+const sourceName = (report: AlertObject): string =>
+  (report.dashboard as any)?.dashboard_title ||
+  (report.chart as any)?.slice_name ||
+  report.dashboard?.label ||
+  report.chart?.label ||
+  '';
+
 const sourceLabel = (report: AlertObject): string => {
-  if (report.dashboard_id || report.dashboard?.value || report.dashboard?.id) {
+  if (getDashboardId(report)) {
     return t('Dashboard');
   }
   if (report.chart_id || report.chart?.value || report.chart?.id) {
@@ -123,6 +163,56 @@ const recipientTargets = (report: AlertObject): string => {
 };
 
 function SendNowModal({ show, reports, onHide, onSend }: SendNowModalProps) {
+  // dashboard id -> label of every tab id, loaded when the modal opens
+  const [tabLabels, setTabLabels] = useState<
+    Record<number, Record<string, string>>
+  >({});
+
+  useEffect(() => {
+    if (!show) {
+      return undefined;
+    }
+    const ids = Array.from(
+      new Set(
+        reports
+          .map(getDashboardId)
+          .filter((id): id is number => id !== undefined),
+      ),
+    );
+    let cancelled = false;
+    ids.forEach(id => {
+      SupersetClient.get({ endpoint: `/api/v1/dashboard/${id}/tabs` })
+        .then(({ json }) => {
+          if (cancelled) return;
+          const labels: Record<string, string> = {};
+          flattenTabs(json?.result?.tab_tree || []).forEach(tab => {
+            labels[tab.value] = tab.label;
+          });
+          setTabLabels(prev => ({ ...prev, [id]: labels }));
+        })
+        .catch(() => {});
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [show, reports]);
+
+  const tabsText = (report: AlertObject): string => {
+    const dashboardId = getDashboardId(report);
+    if (!dashboardId) {
+      return '';
+    }
+    const picked = getPickedTabs(report);
+    if (!picked.length) {
+      return t('All tabs');
+    }
+    const labels = tabLabels[dashboardId] || {};
+    return picked
+      .map(tab => labels[tab])
+      .filter(Boolean)
+      .join(', ');
+  };
+
   const handleSend = () => {
     if (!reports.length) {
       return;
@@ -160,7 +250,17 @@ function SendNowModal({ show, reports, onHide, onSend }: SendNowModalProps) {
             {reports.map(report => (
               <div className="report-row" key={report.id}>
                 <div className="report-name">{report.name}</div>
-                <div className="muted">{sourceLabel(report)}</div>
+                <div className="muted">
+                  <div>
+                    {sourceLabel(report)}
+                    {sourceName(report) ? `: ${sourceName(report)}` : ''}
+                  </div>
+                  {tabsText(report) && (
+                    <div>
+                      {t('Tabs')}: {tabsText(report)}
+                    </div>
+                  )}
+                </div>
                 <div className="muted">{recipientTargets(report)}</div>
               </div>
             ))}

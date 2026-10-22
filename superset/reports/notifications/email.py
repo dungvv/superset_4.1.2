@@ -309,9 +309,12 @@ class EmailNotification(BaseNotification):  # pylint: disable=too-few-public-met
         )
 
     def _get_subject(self) -> str:
+        prefix = (app.config["EMAIL_REPORTS_SUBJECT_PREFIX"] or "").strip()
+        if not prefix:
+            return self._name
         return __(
             "%(prefix)s %(title)s",
-            prefix=app.config["EMAIL_REPORTS_SUBJECT_PREFIX"],
+            prefix=prefix,
             title=self._name,
         )
 
