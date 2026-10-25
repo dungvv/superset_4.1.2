@@ -1256,9 +1256,14 @@ class ExploreMixin:  # pylint: disable=too-many-public-methods
     def dttm_sql_literal(self, dttm: datetime, col: "TableColumn") -> str:
         """Convert datetime object to a SQL expression string"""
 
+        # Oracle cannot implicitly parse ISO string literals (ORA-01843), so
+        # untyped temporal columns (e.g. from virtual datasets) default to TIMESTAMP.
+        col_type = col.type or (
+            "TIMESTAMP" if self.db_engine_spec.engine == "oracle" else None
+        )
         sql = (
-            self.db_engine_spec.convert_dttm(col.type, dttm, db_extra=self.db_extra)
-            if col.type
+            self.db_engine_spec.convert_dttm(col_type, dttm, db_extra=self.db_extra)
+            if col_type
             else None
         )
 

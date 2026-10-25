@@ -203,10 +203,11 @@ function SendNowModal({ show, reports, onHide, onSend }: SendNowModalProps) {
       return '';
     }
     const picked = getPickedTabs(report);
-    if (!picked.length) {
-      return t('All tabs');
-    }
     const labels = tabLabels[dashboardId] || {};
+    if (!picked.length) {
+      // Nothing to show for a dashboard without tabs (or with a single one)
+      return Object.keys(labels).length > 1 ? t('All tabs') : '';
+    }
     return picked
       .map(tab => labels[tab])
       .filter(Boolean)
