@@ -252,6 +252,30 @@ def get_environment_tag() -> dict[str, Any]:
     return env_tag or {}
 
 
+def with_upload_file_menu(menu: list[Any]) -> list[Any]:
+    """Add Settings > Manage > Upload file for the users who can use it.
+
+    The page is not a FAB menu entry (that would need a second "menu access"
+    permission): the entry is added here, from the single permission
+    ``can access on UploadFile``. This data is sent with every page, the React
+    ones and the Flask-AppBuilder ones (List Roles, List Users...), which do not
+    receive the permissions of the user.
+    """
+    if not security_manager.has_access("can_access", "UploadFile"):
+        return menu
+    entry = {
+        "name": "Upload File",
+        "icon": "fa-upload",
+        "label": __("Upload file"),
+        "url": "/upload-file/",
+    }
+    for item in menu:
+        if isinstance(item, dict) and item.get("name") == "Manage":
+            item["childs"] = [*item.get("childs", []), entry]
+            return menu
+    return [*menu, {"name": "Manage", "icon": "", "label": __("Manage"), "childs": [entry]}]
+
+
 def menu_data(user: User) -> dict[str, Any]:
     languages = {
         lang: {**appbuilder.languages[lang], "url": appbuilder.get_url_for_locale(lang)}
@@ -262,7 +286,7 @@ def menu_data(user: User) -> dict[str, Any]:
         brand_text = brand_text()
 
     return {
-        "menu": appbuilder.menu.get_data(),
+        "menu": with_upload_file_menu(appbuilder.menu.get_data()),
         "brand": {
             "path": appbuilder.app.config["LOGO_TARGET_PATH"] or "/superset/welcome/",
             "icon": appbuilder.app_icon,

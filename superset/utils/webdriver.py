@@ -217,6 +217,85 @@ class WebDriverPlaywright(WebDriverProxy):
                     "Wait %i seconds for chart animation", selenium_animation_wait
                 )
                 page.wait_for_timeout(selenium_animation_wait * 1000)
+
+                # Dynamic height detection: remove CSS height constraints,
+                # measure actual content height, and resize viewport to fit.
+                if current_app.config.get("SCREENSHOT_DYNAMIC_HEIGHT", True):
+                    try:
+                        # Step 1: Remove height constraints so content
+                        # flows naturally instead of being locked to 100vh
+                        page.evaluate("""() => {
+                            const selectors = [
+                                'html', 'body',
+                                '.standalone',
+                                '.dashboard',
+                                '.dashboard-content',
+                                '.grid-container',
+                                '.dashboard-grid',
+                                '.react-grid-layout',
+                            ];
+                            for (const sel of selectors) {
+                                const el = document.querySelector(sel);
+                                if (el) {
+                                    el.style.setProperty(
+                                        'height', 'auto', 'important'
+                                    );
+                                    el.style.setProperty(
+                                        'min-height', '0', 'important'
+                                    );
+                                    el.style.setProperty(
+                                        'max-height', 'none', 'important'
+                                    );
+                                    el.style.setProperty(
+                                        'overflow', 'visible', 'important'
+                                    );
+                                }
+                            }
+                        }""")
+                        # Wait for the browser to reflow after CSS changes
+                        page.wait_for_timeout(1000)
+
+                        # Step 2: Measure actual content height
+                        content_height = page.evaluate("""() => {
+                            const grid = document.querySelector(
+                                '.react-grid-layout'
+                            );
+                            if (grid) return grid.scrollHeight;
+                            const standalone = document.querySelector(
+                                '.standalone'
+                            );
+                            if (standalone) return standalone.scrollHeight;
+                            return document.body.scrollHeight;
+                        }""")
+                        padding = current_app.config.get(
+                            "SCREENSHOT_DYNAMIC_HEIGHT_PADDING", 100
+                        )
+                        max_height = current_app.config.get(
+                            "SCREENSHOT_DYNAMIC_HEIGHT_MAX", 8000
+                        )
+                        target_height = min(
+                            content_height + padding, max_height
+                        )
+                        logger.debug(
+                            "Dynamic height: content=%d, target=%d (window=%d)",
+                            content_height,
+                            target_height,
+                            self._window[1],
+                        )
+
+                        # Step 3: Resize viewport to fit content
+                        page.set_viewport_size(
+                            {"width": self._window[0], "height": target_height}
+                        )
+                        # Brief wait for reflow after resize
+                        page.wait_for_timeout(500)
+                    except Exception:  # pylint: disable=broad-except
+                        logger.warning(
+                            "Failed to detect dynamic height, "
+                            "using static window size",
+                            exc_info=True,
+                        )
+
                 logger.debug(
                     "Taking a PNG screenshot of url %s as user %s",
                     url,
@@ -270,7 +349,15 @@ class WebDriverSelenium(WebDriverProxy):
         kwargs.update(current_app.config["WEBDRIVER_CONFIGURATION"])
         logger.debug("Init selenium driver")
 
-        return driver_class(**kwargs)
+        driver = driver_class(**kwargs)
+        # Without this Selenium keeps its 300s default and a hung page only
+        # fails after 5 minutes ("Timed out receiving message from renderer").
+        page_load_timeout = current_app.config.get(
+            "SCREENSHOT_SELENIUM_PAGE_LOAD_TIMEOUT"
+        )
+        if page_load_timeout:
+            driver.set_page_load_timeout(page_load_timeout)
+        return driver
 
     def auth(self, user: User) -> WebDriver:
         driver = self.create()
@@ -282,13 +369,10 @@ class WebDriverSelenium(WebDriverProxy):
     def destroy(driver: WebDriver, tries: int = 2) -> None:
         """Destroy a driver"""
         # This is some very flaky code in selenium. Hence the retries
-        # and catch-all exceptions
+        # and catch-all exceptions. quit() ends chromedriver and its Chrome
+        # processes; close() first would wait on a hung renderer.
         try:
-            retry_call(driver.close, max_tries=tries)
-        except Exception:  # pylint: disable=broad-except
-            pass
-        try:
-            driver.quit()
+            retry_call(driver.quit, max_tries=tries)
         except Exception:  # pylint: disable=broad-except
             pass
 
@@ -349,9 +433,51 @@ class WebDriverSelenium(WebDriverProxy):
         return error_messages
 
     def get_screenshot(self, url: str, element_name: str, user: User) -> bytes | None:
-        driver = self.auth(user)
-        driver.set_window_size(*self._window)
-        driver.get(url)
+        """
+        Take the screenshot, retrying with a fresh browser when the page fails
+        to load (e.g. "Timed out receiving message from renderer" while several
+        dashboards render at once). Waits after the page has loaded are not
+        retried: they already allow minutes and a retry would double that.
+        """
+        retries = max(
+            0, int(current_app.config.get("SCREENSHOT_SELENIUM_LOAD_RETRIES", 1))
+        )
+        for attempt in range(retries + 1):
+            try:
+                return self._get_screenshot_once(url, element_name, user)
+            except WebDriverException:
+                if attempt >= retries:
+                    raise
+                logger.warning(
+                    "Page failed to load (attempt %i/%i), retrying with a new "
+                    "browser: %s",
+                    attempt + 1,
+                    retries + 1,
+                    url,
+                    exc_info=True,
+                )
+        return None
+
+    def _get_screenshot_once(
+        self, url: str, element_name: str, user: User
+    ) -> bytes | None:
+        driver = self.create()
+        try:
+            # Inside try/finally: a page load timeout must still quit Chrome,
+            # otherwise the hung browser stays in the worker and slows the
+            # next reports down.
+            driver = machine_auth_provider_factory.instance.authenticate_webdriver(
+                driver, user
+            )
+            driver.set_window_size(*self._window)
+            driver.get(url)
+            return self._capture(driver, url, element_name, user)
+        finally:
+            self.destroy(driver, current_app.config["SCREENSHOT_SELENIUM_RETRIES"])
+
+    def _capture(
+        self, driver: WebDriver, url: str, element_name: str, user: User
+    ) -> bytes | None:
         img: bytes | None = None
         selenium_headstart = current_app.config["SCREENSHOT_SELENIUM_HEADSTART"]
         logger.debug("Sleeping for %i seconds", selenium_headstart)
@@ -404,6 +530,71 @@ class WebDriverSelenium(WebDriverProxy):
             ]
             logger.debug("Wait %i seconds for chart animation", selenium_animation_wait)
             sleep(selenium_animation_wait)
+
+            # Dynamic height detection: remove CSS height constraints,
+            # measure actual content height, and resize window to fit.
+            if current_app.config.get("SCREENSHOT_DYNAMIC_HEIGHT", True):
+                try:
+                    # Step 1: Remove height constraints so content
+                    # flows naturally instead of being locked to 100vh
+                    driver.execute_script(
+                        "var selectors = ["
+                        "  'html', 'body',"
+                        "  '.standalone',"
+                        "  '.dashboard',"
+                        "  '.dashboard-content',"
+                        "  '.grid-container',"
+                        "  '.dashboard-grid',"
+                        "  '.react-grid-layout'"
+                        "];"
+                        "for (var i = 0; i < selectors.length; i++) {"
+                        "  var el = document.querySelector(selectors[i]);"
+                        "  if (el) {"
+                        "    el.style.setProperty('height','auto','important');"
+                        "    el.style.setProperty('min-height','0','important');"
+                        "    el.style.setProperty('max-height','none','important');"
+                        "    el.style.setProperty('overflow','visible','important');"
+                        "  }"
+                        "}"
+                    )
+                    # Wait for the browser to reflow after CSS changes
+                    sleep(1)
+
+                    # Step 2: Measure actual content height
+                    content_height = driver.execute_script(
+                        "var grid = document.querySelector('.react-grid-layout');"
+                        " if (grid) return grid.scrollHeight;"
+                        " var standalone = document.querySelector('.standalone');"
+                        " if (standalone) return standalone.scrollHeight;"
+                        " return document.body.scrollHeight;"
+                    )
+                    padding = current_app.config.get(
+                        "SCREENSHOT_DYNAMIC_HEIGHT_PADDING", 100
+                    )
+                    max_height = current_app.config.get(
+                        "SCREENSHOT_DYNAMIC_HEIGHT_MAX", 8000
+                    )
+                    target_height = min(
+                        content_height + padding, max_height
+                    )
+                    logger.debug(
+                        "Dynamic height: content=%d, target=%d (window=%d)",
+                        content_height,
+                        target_height,
+                        self._window[1],
+                    )
+
+                    # Step 3: Resize window to fit content
+                    driver.set_window_size(self._window[0], target_height)
+                    # Brief wait for reflow after resize
+                    sleep(0.5)
+                except Exception:  # pylint: disable=broad-except
+                    logger.warning(
+                        "Failed to detect dynamic height, "
+                        "using static window size",
+                        exc_info=True,
+                    )
+
             logger.debug(
                 "Taking a PNG screenshot of url %s as user %s",
                 url,
@@ -433,6 +624,4 @@ class WebDriverSelenium(WebDriverProxy):
             logger.exception(
                 "Encountered an unexpected error when requesting url %s", url
             )
-        finally:
-            self.destroy(driver, current_app.config["SCREENSHOT_SELENIUM_RETRIES"])
         return img

@@ -406,6 +406,13 @@ class SupersetAppInitializer:  # pylint: disable=too-many-public-methods
             icon="fa-lock",
         )
 
+        from superset.views.upload_file import UploadFileView
+
+        # No FAB menu entry: that would need a second ("menu access") permission.
+        # The frontend adds Settings > Manage > Upload file for the roles that
+        # hold "can access on UploadFile".
+        appbuilder.add_view_no_menu(UploadFileView)
+
     def init_app_in_ctx(self) -> None:
         """
         Runs init logic in the context of the app
@@ -427,6 +434,17 @@ class SupersetAppInitializer:  # pylint: disable=too-many-public-methods
             register_sqla_event_listeners()
 
         self.init_views()
+        self.sync_upload_file_permissions()
+
+    def sync_upload_file_permissions(self) -> None:
+        """Create the Upload file permission and give it to the roles that need it."""
+        try:
+            from superset.security import role_upload_file
+
+            role_upload_file.sync_permissions()
+        except Exception:  # pylint: disable=broad-except
+            # e.g. database not ready / not migrated yet: never block start-up
+            logger.warning("Could not sync the Upload file permissions", exc_info=True)
 
     def check_secret_key(self) -> None:
         def log_default_secret_key_warning() -> None:

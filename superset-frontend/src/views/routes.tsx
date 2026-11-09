@@ -41,6 +41,10 @@ const AlertReportList = lazy(
     ),
 );
 
+const UploadFile = lazy(
+  () => import(/* webpackChunkName: "UploadFile" */ 'src/pages/UploadFile'),
+);
+
 const AnnotationList = lazy(
   () =>
     import(/* webpackChunkName: "AnnotationList" */ 'src/pages/AnnotationList'),
@@ -178,6 +182,10 @@ export const routes: Routes = [
   {
     path: '/sqllab/history/',
     Component: QueryHistoryList,
+  },
+  {
+    path: '/upload-file/',
+    Component: UploadFile,
   },
   {
     path: '/alert/list/',

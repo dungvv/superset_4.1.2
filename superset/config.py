@@ -727,6 +727,11 @@ SCREENSHOT_LOCATE_WAIT = int(timedelta(seconds=10).total_seconds())
 SCREENSHOT_LOAD_WAIT = int(timedelta(minutes=1).total_seconds())
 # Selenium destroy retries
 SCREENSHOT_SELENIUM_RETRIES = 5
+# Max time for a page (and the login page) to load in selenium, in seconds.
+# Selenium's own default is 300s.
+SCREENSHOT_SELENIUM_PAGE_LOAD_TIMEOUT = int(timedelta(minutes=5).total_seconds())
+# Extra attempts, each with a fresh browser, when a page fails to load
+SCREENSHOT_SELENIUM_LOAD_RETRIES = 1
 # Give selenium an headstart, in seconds
 SCREENSHOT_SELENIUM_HEADSTART = 3
 # Wait for the chart animation, in seconds
@@ -1494,8 +1499,10 @@ REPORT_MINIMUM_INTERVAL = int(timedelta(minutes=0).total_seconds())
 # BATCH_SIZE reports, STAGGER_SECONDS apart (keep BATCH_SIZE <= the concurrency of
 # the reports worker). MAX_BATCH > 0 caps one request, 0 means no cap.
 ALERT_REPORTS_SEND_NOW_MAX_BATCH = 0
-ALERT_REPORTS_SEND_NOW_BATCH_SIZE = 4
-ALERT_REPORTS_SEND_NOW_STAGGER_SECONDS = 15
+# A dashboard screenshot takes 1-5 minutes, so waves must be far enough apart for
+# the previous one to finish.
+ALERT_REPORTS_SEND_NOW_BATCH_SIZE = 2
+ALERT_REPORTS_SEND_NOW_STAGGER_SECONDS = 90
 
 # A custom prefix to use on all Alerts & Reports emails
 EMAIL_REPORTS_SUBJECT_PREFIX = "[Report] "

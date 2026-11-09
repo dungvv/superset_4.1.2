@@ -16,9 +16,14 @@
 # under the License.
 
 import logging
+import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from io import BytesIO
+from pathlib import Path
 from typing import Any, Optional
+
+from flask import current_app
 
 from superset.commands.report.exceptions import ReportSchedulePdfFailedError
 
@@ -370,3 +375,59 @@ def build_pdf_from_screenshots(
         ) from ex
 
     return new_pdf.read()
+
+
+def convert_docx_to_pdf(docx_bytes: bytes, timeout: int | None = None) -> bytes:
+    """Convert a .docx to PDF via LibreOffice, preserving text/tables/layout.
+
+    Unlike build_pdf_from_screenshots (images only), this keeps the Word
+    template intact, so the PDF matches the .docx the user would download.
+    """
+    binary = current_app.config.get("WORD_EXPORT_SOFFICE_BINARY", "soffice")
+    timeout = timeout or current_app.config.get("WORD_EXPORT_PDF_TIMEOUT", 180)
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = Path(tmp_dir)
+        source = tmp_path / "report.docx"
+        source.write_bytes(docx_bytes)
+
+        # soffice needs a writable profile; a per-call one keeps concurrent
+        # conversions from corrupting a shared default profile or hanging.
+        profile_dir = tmp_path / "profile"
+        command = [
+            binary,
+            f"-env:UserInstallation=file://{profile_dir}",
+            "--headless",
+            "--norestore",
+            "--convert-to",
+            "pdf",
+            "--outdir",
+            str(tmp_path),
+            str(source),
+        ]
+
+        try:
+            result = subprocess.run(  # noqa: S603
+                command,
+                capture_output=True,
+                timeout=timeout,
+                check=False,
+            )
+        except FileNotFoundError as ex:
+            raise ReportSchedulePdfFailedError(
+                f"LibreOffice binary {binary!r} not found; install libreoffice-writer "
+                "or set WORD_EXPORT_SOFFICE_BINARY"
+            ) from ex
+        except subprocess.TimeoutExpired as ex:
+            raise ReportSchedulePdfFailedError(
+                f"LibreOffice timed out after {timeout}s converting docx to pdf"
+            ) from ex
+
+        output = source.with_suffix(".pdf")
+        if not output.exists():
+            raise ReportSchedulePdfFailedError(
+                "LibreOffice did not produce a PDF "
+                f"(exit {result.returncode}): {result.stderr.decode(errors='replace')}"
+            )
+
+        return output.read_bytes()

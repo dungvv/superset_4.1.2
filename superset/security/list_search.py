@@ -21,10 +21,13 @@ from __future__ import annotations
 from typing import Any
 
 from flask import has_request_context, request, url_for
+from flask_appbuilder.fieldwidgets import BS3TextFieldWidget
 from flask_appbuilder.models.filters import BaseFilter
+from flask_appbuilder.security.sqla.models import User
 from flask_appbuilder.security.views import UserDBModelView
 from flask_babel import lazy_gettext
-from sqlalchemy import or_
+from sqlalchemy import event, or_
+from wtforms import StringField, validators
 
 KEYWORD_ARG = "q"
 KEYWORD_LIST_TEMPLATE = "superset/fab_overrides/keyword_list.html"
@@ -67,6 +70,31 @@ class KeywordSearchFilter(BaseFilter):
         )
 
 
+@event.listens_for(User.last_name, "set", retval=True, propagate=True)
+def _last_name_never_null(
+    target: Any, value: Any, oldvalue: Any, initiator: Any
+) -> Any:
+    """``ab_user.last_name`` is NOT NULL, but users coming from the SSO have no
+    last name. Whatever sets it (the edit form, a login...), a missing value is
+    saved as an empty string instead of failing with a NotNullViolation."""
+    return "" if value is None else value
+
+
+def _optional_last_name() -> StringField:
+    """Last name that may be left empty.
+
+    The ``ab_user.last_name`` column is NOT NULL, so an empty value is saved as
+    an empty string (never as NULL).
+    """
+    return StringField(
+        lazy_gettext("Last Name"),
+        description=lazy_gettext("Write the user last name (optional)"),
+        validators=[validators.Optional(), validators.Length(max=64)],
+        widget=BS3TextFieldWidget(),
+        filters=[lambda value: (value or "").strip()],
+    )
+
+
 class UnitelUserDBModelView(UserDBModelView):
     """
     FAB List Users with a search box on first name, last name, username, and
@@ -86,6 +114,16 @@ class UnitelUserDBModelView(UserDBModelView):
     ]
 
     edit_template = USER_EDIT_TEMPLATE
+
+    # Last name is optional when a user is created or edited
+    add_form_extra_fields = {
+        **UserDBModelView.add_form_extra_fields,
+        "last_name": _optional_last_name(),
+    }
+    edit_form_extra_fields = {
+        **(getattr(UserDBModelView, "edit_form_extra_fields", None) or {}),
+        "last_name": _optional_last_name(),
+    }
 
     def _reset_password_url(self) -> str | None:
         pk = (request.view_args or {}).get("pk")
