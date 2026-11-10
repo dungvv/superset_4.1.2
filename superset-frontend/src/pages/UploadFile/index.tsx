@@ -27,7 +27,7 @@ import { Select, Steps } from 'src/components';
 import SubMenu from 'src/features/home/SubMenu';
 import withToasts from 'src/components/MessageToasts/withToasts';
 import History from './History';
-import { BUSINESS_TYPES, buildTemplateCsv, getBusinessType } from './template';
+import { BUSINESS_TYPES, getBusinessType } from './template';
 
 const ACCEPTED = ['csv', 'xlsx', 'xls'];
 const MAX_SIZE = 5 * 1024 * 1024;
@@ -151,6 +151,8 @@ const ResultBanner = styled.div`
       margin-left: ${theme.gridUnit * 4}px; }
     .summary-chips span { padding: 0 ${theme.gridUnit * 3}px;
       border-radius: ${theme.borderRadius}px; }
+    .summary-chips .total-chip { background: ${theme.colors.grayscale.light3};
+      color: ${theme.colors.grayscale.dark2}; }
     .summary-chips [data-reply='TS'] { background: #C6EFCE; color: #006100; }
     .summary-chips [data-reply='TA'] { background: #FFEB9C; color: #9C5700; }
     .summary-chips [data-reply='TF'] { background: #FFC7CE; color: #9C0006; }
@@ -182,15 +184,6 @@ const formatSize = (bytes: number) =>
     : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 
 const extOf = (name: string) => name.split('.').pop()?.toLowerCase() || '';
-
-function saveBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
 
 function DataTable({
   title,
@@ -403,14 +396,12 @@ function UploadFile({ addDangerToast, addSuccessToast }: any) {
     }
   };
 
+  // The Excel template is built by the server (columns formatted as Text)
   const downloadTemplate = () => {
     if (!selectedType) return;
-    saveBlob(
-      new Blob(['\uFEFF', buildTemplateCsv(selectedType)], {
-        type: 'text/csv;charset=utf-8',
-      }),
-      selectedType.templateFileName,
-    );
+    window.location.href = `/upload-file/api/template?business_type=${encodeURIComponent(
+      selectedType.value,
+    )}`;
   };
 
   const download = (format: 'csv' | 'xlsx') => {
@@ -541,7 +532,10 @@ function UploadFile({ addDangerToast, addSuccessToast }: any) {
               <Icons.CircleCheckSolid iconSize="xl" />
               {t('Your file has been processed')}
               <span className="summary-chips">
-                {['TS', 'TA', 'TF'].map(k => (
+                <span className="total-chip">
+                  {t('Total')}: {resultTotal}
+                </span>
+                {['TS', 'TF', 'TA'].map(k => (
                   <span key={k} data-reply={k}>
                     {k}: {summary[k] ?? 0}
                   </span>

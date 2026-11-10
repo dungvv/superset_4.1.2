@@ -57,9 +57,12 @@ VIETNAM_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 DISPLAY_FORMAT = "%d/%m/%Y %H:%M:%S"
 MAX_MESSAGE_LENGTH = 2000
 
-# Stored in upper case (as in the DDL); the API and the page use lower case
+# Stored in upper case (as in the DDL); the API and the page use lower case.
+# A failed check says where it failed:
 STATUS_SUCCESS = "SUCCESS"
-STATUS_FAIL = "FAIL"
+STATUS_FAIL_UPLOAD = "FAIL_UPLOAD"  # the file was refused (type, size, template, data)
+STATUS_FAIL_PROCESS = "FAIL_PROCESS"  # valid file, but the processing failed (DWH...)
+STATUS_FAIL_LEGACY = "FAIL"  # rows written before the two kinds existed
 
 _metadata = MetaData()
 history_table = Table(
@@ -68,13 +71,14 @@ history_table = Table(
     Column("id", Integer, primary_key=True),
     Column("service", String(64), nullable=False),
     Column("user_id", Integer),
-    Column("username", String(256)),
+    Column("user_name", String(256)),
     Column("checked_at", DateTime, nullable=False),  # Vietnam time
     Column("status", String(16), nullable=False),
     Column("fail_message", String(MAX_MESSAGE_LENGTH)),
     Column("file_name", String(256)),
     # Legacy: the output is rebuilt from the detail rows, so it stays empty
     Column("result_data", LargeBinary),
+    Column("total_count", Integer),  # number of transactions of the file
     Column("ts_count", Integer),
     Column("ta_count", Integer),
     Column("tf_count", Integer),
@@ -84,11 +88,12 @@ history_table = Table(
 
 SORTABLE_COLUMNS = {
     "service": history_table.c.service,
-    "user": history_table.c.username,
+    "user": history_table.c.user_name,
     "check_date": history_table.c.checked_at,
     "status": history_table.c.status,
     "fail_message": history_table.c.fail_message,
     "file_name": history_table.c.file_name,
+    "total": history_table.c.total_count,
     "ts": history_table.c.ts_count,
     "ta": history_table.c.ta_count,
     "tf": history_table.c.tf_count,
@@ -123,21 +128,34 @@ def add_entry(
     *,
     handler: BusinessHandler,
     user_id: Optional[int],
-    username: Optional[str],
+    user_name: Optional[str],
     file_name: str,
     result: Optional[ProcessResult] = None,
     fail_message: Optional[str] = None,
+    failure: str = "upload",
+    total_count: Optional[int] = None,
     duration_ms: Optional[int] = None,
 ) -> int:
-    """Record one check (and the rows of its output) and return its id."""
+    """Record one check (and the rows of its output) and return its id.
+
+    Without ``result`` the check failed: ``failure`` is ``"upload"`` when the
+    file was refused, ``"process"`` when the file was valid but its processing
+    failed (``total_count`` is then the number of rows of the file).
+    """
+    if result is not None:
+        status = STATUS_SUCCESS
+        total_count = len(result.rows)
+    else:
+        status = STATUS_FAIL_PROCESS if failure == "process" else STATUS_FAIL_UPLOAD
     values = {
         "service": handler.label,
         "user_id": user_id,
-        "username": (username or "")[:256] or None,
+        "user_name": (user_name or "")[:256] or None,
         "checked_at": _now(),
-        "status": STATUS_SUCCESS if result is not None else STATUS_FAIL,
+        "status": status,
         "fail_message": (fail_message or "")[:MAX_MESSAGE_LENGTH] or None,
         "file_name": file_name[:256],
+        "total_count": total_count,
         "ts_count": result.summary.get("TS", 0) if result is not None else None,
         "ta_count": result.summary.get("TA", 0) if result is not None else None,
         "tf_count": result.summary.get("TF", 0) if result is not None else None,
@@ -171,7 +189,7 @@ def _filters(
         conditions.append(history_table.c.service == service)
     if user:
         conditions.append(
-            func.lower(history_table.c.username).like(_like_pattern(user), escape="\\")
+            func.lower(history_table.c.user_name).like(_like_pattern(user), escape="\\")
         )
     if file_name:
         conditions.append(
@@ -179,8 +197,15 @@ def _filters(
                 _like_pattern(file_name), escape="\\"
             )
         )
-    if status and status.upper() in (STATUS_SUCCESS, STATUS_FAIL):
-        conditions.append(history_table.c.status == status.upper())
+    if status:
+        wanted = {
+            "SUCCESS": [STATUS_SUCCESS],
+            "FAIL_UPLOAD": [STATUS_FAIL_UPLOAD, STATUS_FAIL_LEGACY],
+            "FAIL_PROCESS": [STATUS_FAIL_PROCESS],
+            "FAIL": [STATUS_FAIL_UPLOAD, STATUS_FAIL_PROCESS, STATUS_FAIL_LEGACY],
+        }.get(status.upper())
+        if wanted:
+            conditions.append(history_table.c.status.in_(wanted))
     # "Check Date" is picked as days (Vietnam time); both ends are included
     if date_from:
         conditions.append(history_table.c.checked_at >= datetime.combine(date_from, time.min))
@@ -216,11 +241,12 @@ def list_entries(
             select(
                 history_table.c.id,
                 history_table.c.service,
-                history_table.c.username,
+                history_table.c.user_name,
                 history_table.c.checked_at,
                 history_table.c.status,
                 history_table.c.fail_message,
                 history_table.c.file_name,
+                history_table.c.total_count,
                 history_table.c.ts_count,
                 history_table.c.ta_count,
                 history_table.c.tf_count,
@@ -238,14 +264,15 @@ def list_entries(
             {
                 "id": int(row.id),
                 "service": row.service,
-                "user": row.username or "",
+                "user": row.user_name or "",
                 "check_date": row.checked_at.strftime(DISPLAY_FORMAT),
-                "status": "success" if success else "fail",
+                "status": _status_key(row.status),
                 "fail_message": row.fail_message or "",
                 "file_name": row.file_name or "",
                 "result_file_name": (
                     result_file_name(row.file_name, row.checked_at) if success else ""
                 ),
+                "total": _int_or_none(row.total_count),
                 "ts": _int_or_none(row.ts_count),
                 "ta": _int_or_none(row.ta_count),
                 "tf": _int_or_none(row.tf_count),
@@ -259,6 +286,13 @@ def list_entries(
             }
         )
     return int(total or 0), entries
+
+
+def _status_key(status: str) -> str:
+    """Status as the API and the page name it."""
+    if status == STATUS_SUCCESS:
+        return "success"
+    return "fail_process" if status == STATUS_FAIL_PROCESS else "fail_upload"
 
 
 def _int_or_none(value: Any) -> Optional[int]:

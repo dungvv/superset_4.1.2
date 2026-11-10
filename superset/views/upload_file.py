@@ -27,7 +27,7 @@ from flask_babel import gettext as __
 
 from superset.superset_typing import FlaskResponse
 from superset.upload_file import history
-from superset.upload_file.export import build_csv, build_xlsx
+from superset.upload_file.export import build_csv, build_template_xlsx, build_xlsx
 from superset.upload_file.handlers.base import ProcessError
 from superset.upload_file.handlers import get_handler, list_business_types
 from superset.upload_file.validator import UploadFileError
@@ -64,6 +64,7 @@ class UploadFileView(BaseSupersetView):
             "process",
             "history_list",
             "download",
+            "template",
         )
     }
 
@@ -85,7 +86,7 @@ class UploadFileView(BaseSupersetView):
             return history.add_entry(
                 handler=handler,
                 user_id=getattr(g.user, "id", None),
-                username=getattr(g.user, "username", None),
+                user_name=getattr(g.user, "username", None),
                 file_name=file_name,
                 duration_ms=int((time.monotonic() - started) * 1000),
                 **kwargs,
@@ -153,7 +154,15 @@ class UploadFileView(BaseSupersetView):
         try:
             result = handler.process(validation)
         except ProcessError as ex:
-            self._record(handler, file.filename, started, fail_message=str(ex))
+            # the file is valid: this is a failure of the processing, not of the file
+            self._record(
+                handler,
+                file.filename,
+                started,
+                fail_message=str(ex),
+                failure="process",
+                total_count=validation.total_rows,
+            )
             return self.json_response({"message": __(str(ex))}, 502)
 
         entry_id = self._record(handler, file.filename, started, result=result)
@@ -204,6 +213,25 @@ class UploadFileView(BaseSupersetView):
             {"count": count, "page_size": history.PAGE_SIZE, "result": entries}
         )
 
+    @expose("/api/template", methods=("GET",))
+    @has_access_api
+    def template(self) -> FlaskResponse:
+        """The Excel template of a business type."""
+        handler = get_handler(request.args.get("business_type"))
+        if handler is None:
+            return self.json_response({"message": __("Unknown business type")}, 400)
+        return Response(
+            build_template_xlsx(handler),
+            mimetype=(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            ),
+            headers={
+                "Content-Disposition": _content_disposition(
+                    f"File_Upload_Template_{handler.value}.xlsx"
+                )
+            },
+        )
+
     @expose("/api/download/<int:entry_id>", methods=("GET",))
     @has_access_api
     def download(self, entry_id: int) -> FlaskResponse:
@@ -220,7 +248,11 @@ class UploadFileView(BaseSupersetView):
         name, result = saved
         filename = f"{name}.{file_format}"
         if file_format == "csv":
-            data, mimetype = build_csv(result), "text/csv"
+            # Excel on Windows / Mac needs a "sep=" line to split a tab separated
+            # CSV; Linux readers do not (it would show as a data row)
+            user_agent = request.headers.get("User-Agent", "")
+            excel_hint = "Windows" in user_agent or "Macintosh" in user_agent
+            data, mimetype = build_csv(result, excel_hint), "text/csv"
         else:
             data = build_xlsx(result)
             mimetype = (

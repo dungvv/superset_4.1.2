@@ -64,7 +64,8 @@ const Body = styled.div`
       border-radius: ${theme.borderRadius}px;
       font-weight: ${theme.typography.weights.bold}; }
     .status.success { background: #C6EFCE; color: #006100; }
-    .status.fail { background: #FFC7CE; color: #9C0006; }
+    .status.fail_upload { background: #FFC7CE; color: #9C0006; }
+    .status.fail_process { background: #FFE0B2; color: #8A4B00; }
     .download { display: flex; gap: ${theme.gridUnit}px; }
     .message { display: inline-block; max-width: 200px; overflow: hidden;
       text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
@@ -79,12 +80,13 @@ interface HistoryRow {
   check_date: string;
   file_name: string;
   result_file_name: string;
+  total: number | null;
   ts: number | null;
   ta: number | null;
   tf: number | null;
   // seconds
   duration: number | null;
-  status: 'success' | 'fail' | '';
+  status: 'success' | 'fail_upload' | 'fail_process' | '';
   fail_message: string;
   can_download: boolean;
   // Empty line that keeps the table at 10 rows
@@ -114,7 +116,8 @@ const SERVICE_OPTIONS = BUSINESS_TYPES.map(b => ({
 }));
 const STATUS_OPTIONS = [
   { value: 'success', label: t('Success') },
-  { value: 'fail', label: t('Fail') },
+  { value: 'fail_upload', label: t('Upload failed') },
+  { value: 'fail_process', label: t('Processing failed') },
 ];
 
 const withBlankRows = (rows: HistoryRow[]): HistoryRow[] => [
@@ -127,6 +130,7 @@ const withBlankRows = (rows: HistoryRow[]): HistoryRow[] => [
     check_date: '',
     file_name: '',
     result_file_name: '',
+    total: null,
     ts: null,
     ta: null,
     tf: null,
@@ -137,6 +141,12 @@ const withBlankRows = (rows: HistoryRow[]): HistoryRow[] => [
     blank: true,
   })),
 ];
+
+const STATUS_LABELS: Record<string, string> = {
+  success: t('Success'),
+  fail_upload: t('Upload failed'),
+  fail_process: t('Processing failed'),
+};
 
 const sortOrder = (order: Order, column: string) => {
   if (order.column !== column) return null;
@@ -273,7 +283,17 @@ export default function History({
         </span>
       ),
     },
-    ...(['ts', 'ta', 'tf'] as const).map(key => ({
+    {
+      title: t('Total row'),
+      dataIndex: 'total',
+      key: 'total',
+      width: 100,
+      sorter: true,
+      sortOrder: sortOrder(order, 'total'),
+      render: (value: number | null, row: HistoryRow) =>
+        row.blank ? null : <span className="count total">{value ?? '-'}</span>,
+    },
+    ...(['ts', 'tf', 'ta'] as const).map(key => ({
       title: key.toUpperCase(),
       dataIndex: key,
       key,
@@ -305,9 +325,7 @@ export default function History({
       sortOrder: sortOrder(order, 'status'),
       render: (status: string) =>
         status ? (
-          <span className={`status ${status}`}>
-            {status === 'success' ? t('Success') : t('Fail')}
-          </span>
+          <span className={`status ${status}`}>{STATUS_LABELS[status]}</span>
         ) : null,
     },
     {

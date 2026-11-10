@@ -153,7 +153,14 @@ BCCS_SQL = """
       AND trans_id IN :ids
 """
 
-# Formats accepted for the "date" column of the uploaded file
+# The "date" column of the uploaded file must be dd/mm/yyyy HH:MM:SS (two digits
+# each, 24 hours), the seconds being optional (missing = 0): it chooses the days
+# that are searched in the DWH, so a date that is silently read the wrong way
+# (day/month swapped) would make every transaction "not found".
+INPUT_DATE_FORMATS = ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M")
+INPUT_DATE_PATTERN = re.compile(r"^\d{2}/\d{2}/\d{4} \d{2}:\d{2}(:\d{2})?$")
+
+# Formats used to read dates that come back from the DWH as text
 DATE_FORMATS = (
     "%Y-%m-%d %H:%M:%S",
     "%Y-%m-%d %H:%M",
@@ -166,14 +173,20 @@ DATE_FORMATS = (
 MAX_REPORTED_ERRORS = 5
 
 
-def parse_date(value: str) -> Optional[datetime]:
+def parse_input_date(value: str) -> Optional[datetime]:
+    """The date of an uploaded row, or None if it is not dd/mm/yyyy HH:MM[:SS]."""
     value = value.strip()
-    for date_format in DATE_FORMATS:
+    if not INPUT_DATE_PATTERN.match(value):
+        return None
+    for date_format in INPUT_DATE_FORMATS:
         try:
             return datetime.strptime(value, date_format)
         except ValueError:
             continue
-    return None
+    return None  # e.g. 32/13/2026 or 25:61:00
+
+
+NORMAL_DATE_FORMAT = "%d/%m/%Y %H:%M:%S"
 
 
 # --- output formats (the partners reconcile these files automatically) ------
@@ -372,19 +385,73 @@ class VPGHandler(BusinessHandler):
     output_columns = OUTPUT_COLUMNS
     output_groups = OUTPUT_GROUPS
     detail_table = DETAIL_TABLE
+    template_descriptions = {
+        "transID": "Mã giao dịch",
+        "date": "Ngày giờ giao dịch, dạng dd/mm/yyyy HH:MM:SS (có thể bỏ giây)",
+        "Phone_NO": "Số điện thoại",
+        "Type": "Loại giao dịch",
+        "Amount": "Số tiền (số)",
+        "Error_code": "Mã lỗi",
+        "Detail": "Chi tiết lỗi",
+        "Provider": "Đơn vị cung cấp",
+    }
+    template_sample_rows = [
+        [
+            "1057018085",
+            "14/10/2026 00:44:05",
+            "2099090028",
+            "PREPAID",
+            "50000",
+            "9",
+            "Request not response from provider",
+            "UNITEL",
+        ],
+        [
+            "1057019308",
+            "14/10/2026 00:54:55",
+            "2098080320",
+            "PREPAID",
+            "5000",
+            "9",
+            "Request not response from provider",
+            "UNITEL",
+        ],
+    ]
+    template_number_columns = frozenset({"Amount"})
+
+    def normalize_rows(self, rows: list[list[str]]) -> list[str]:
+        """Write every valid date as dd/mm/yyyy HH:MM:SS (a missing second is 00),
+        so the preview, the result and the saved rows all show the same thing.
+        The invalid ones are left as they are: ``validate_data`` reports them."""
+        for row in rows:
+            parsed = parse_input_date(row[1])
+            if parsed is not None:
+                row[1] = parsed.strftime(NORMAL_DATE_FORMAT)
+        return []
 
     def validate_data(self, rows: list[list[str]]) -> list[str]:
         errors: list[str] = []
+        bad_date = False
         for number, row in enumerate(rows, start=2):  # row 1 is the header
             if len(errors) >= MAX_REPORTED_ERRORS:
                 errors.append("...")
                 break
             if not row[0].strip():
                 errors.append(f"Row {number}: transID is empty")
-            elif parse_date(row[1]) is None:
-                errors.append(f"Row {number}: invalid date {row[1]!r}")
+            elif parse_input_date(row[1]) is None:
+                bad_date = True
+                errors.append(
+                    f"Row {number}: date {row[1]!r} is not in the format "
+                    "dd/mm/yyyy HH:MM:SS (seconds are optional)"
+                )
             elif row[4].strip() and _to_decimal(row[4]) is None:
                 errors.append(f"Row {number}: invalid Amount {row[4]!r}")
+        if bad_date:
+            errors.append(
+                "Tip: in Excel, format the date column as Text and type "
+                "dd/mm/yyyy HH:MM:SS (an Excel date value shown as m/d/yy can "
+                "swap the day and the month)"
+            )
         return errors
 
     def result_from_records(self, records: list[dict[str, Any]]) -> ProcessResult:
@@ -397,7 +464,7 @@ class VPGHandler(BusinessHandler):
     def process(self, validation: ValidationResult) -> ProcessResult:
         rows = validation.rows
         trans_ids = list(dict.fromkeys(r[0].strip() for r in rows))
-        dates = [d for d in (parse_date(r[1]) for r in rows) if d is not None]
+        dates = [d for d in (parse_input_date(r[1]) for r in rows) if d is not None]
         first_day = datetime.combine(min(dates).date(), datetime.min.time())
         last_day = datetime.combine(max(dates).date(), datetime.min.time())
 
@@ -451,7 +518,7 @@ class VPGHandler(BusinessHandler):
             summary[reply] += 1
             source: dict[str, Any] = {
                 "transID": trans_id,
-                "date": parse_date(row[1]),
+                "date": parse_input_date(row[1]),
                 "Phone_NO": row[2],
                 "Type": row[3],
                 "Amount": row[4],

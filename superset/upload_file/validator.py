@@ -22,6 +22,7 @@ to one business type live in ``superset/upload_file/handlers/``.
 
 import csv
 import io
+import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any
@@ -74,6 +75,30 @@ def _cell_to_str(value: Any) -> str:
     return str(value).strip()
 
 
+_DMY_TIME_FORMATS = {"dd/mm/yyyy hh:mm:ss", "dd/mm/yyyy hh:mm"}
+
+
+def _is_dmy_hms_format(number_format: Any) -> bool:
+    """True for an Excel number format that shows ``dd/mm/yyyy hh:mm[:ss]``.
+
+    An Excel date is a number: with a day/month ambiguous format (e.g. ``m/d/yy``)
+    ``06/11/2026`` typed by a user can silently become the 11th of June. So a
+    date cell is only trusted when the column is displayed as day/month/year.
+    """
+    if not isinstance(number_format, str):
+        return False
+    text = re.sub(r"\[[^\]]*\]", "", number_format.split(";")[0])  # [$-409], [Red]...
+    text = re.sub(r'[\\"]', "", text)
+    return re.sub(r"\s+", " ", text).strip().lower() in _DMY_TIME_FORMATS
+
+
+def _xlsx_cell_to_str(cell: Any) -> str:
+    value = cell.value
+    if isinstance(value, datetime) and _is_dmy_hms_format(cell.number_format):
+        return value.strftime("%d/%m/%Y %H:%M:%S")
+    return _cell_to_str(value)
+
+
 def _trim(row: list[str]) -> list[str]:
     """Drop the trailing empty cells of a row."""
     while row and row[-1] == "":
@@ -111,8 +136,8 @@ def _read_xlsx(content: bytes) -> list[list[str]]:
         sheet.reset_dimensions()
         rows: list[list[str]] = []
         blank_streak = 0
-        for raw in sheet.iter_rows(values_only=True):
-            row = _trim([_cell_to_str(cell) for cell in raw])
+        for raw in sheet.iter_rows():
+            row = _trim([_xlsx_cell_to_str(cell) for cell in raw])
             if row:
                 rows.append(row)
                 blank_streak = 0
