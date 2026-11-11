@@ -386,14 +386,14 @@ class VPGHandler(BusinessHandler):
     output_groups = OUTPUT_GROUPS
     detail_table = DETAIL_TABLE
     template_descriptions = {
-        "transID": "Mã giao dịch",
-        "date": "Ngày giờ giao dịch, dạng dd/mm/yyyy HH:MM:SS (có thể bỏ giây)",
-        "Phone_NO": "Số điện thoại",
-        "Type": "Loại giao dịch",
-        "Amount": "Số tiền (số)",
-        "Error_code": "Mã lỗi",
-        "Detail": "Chi tiết lỗi",
-        "Provider": "Đơn vị cung cấp",
+        "transID": "Transaction ID",
+        "date": "Transaction date and time, format dd/mm/yyyy HH:MM:SS (seconds are optional)",
+        "Phone_NO": "Phone number",
+        "Type": "Transaction type",
+        "Amount": "Amount (number)",
+        "Error_code": "Error code",
+        "Detail": "Error detail",
+        "Provider": "Provider",
     }
     template_sample_rows = [
         [

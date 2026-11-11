@@ -171,29 +171,29 @@ def build_template_xlsx(handler: BusinessHandler) -> bytes:
     sheet.set_row(0, 22)
     sheet.freeze_panes(1, 0)
 
-    guide = workbook.add_worksheet("Hướng dẫn")
+    guide = workbook.add_worksheet("Guide")
     guide.set_column(0, 0, 18)
     guide.set_column(1, 1, 62)
     guide.set_column(2, 8, 24)
     guide.write_string(0, 0, f"Template {handler.label}", title)
     notes = [
-        "Điền dữ liệu vào sheet 'Template' (dòng 1 là tên cột, dữ liệu từ dòng 2) rồi upload file này.",
-        "Các cột có thể sắp xếp theo thứ tự bất kỳ, tên cột không phân biệt hoa thường nhưng phải đủ và đúng tên.",
-        "Cột date phải đúng dạng dd/mm/yyyy HH:MM:SS hoặc dd/mm/yyyy HH:MM (ngày đứng trước, mỗi phần đủ 2 chữ số).",
-        "File upload chỉ được đọc sheet đầu tiên.",
+        "Fill in the data in the 'Template' sheet (row 1 is the column names, data starts from row 2), then upload this file.",
+        "Columns can be in any order. Column names are case-insensitive but all of them must be present and spelled correctly.",
+        "The date column must be in the format dd/mm/yyyy HH:MM:SS or dd/mm/yyyy HH:MM (day first, each part with 2 digits).",
+        "Only the first sheet of the uploaded file is read.",
     ]
     for i, note in enumerate(notes, start=2):
         guide.write_string(i, 0, f"{i - 1}.", plain)
         guide.merge_range(i, 1, i, 8, note, wrapped)
         guide.set_row(i, 30 if len(note) > 110 else 16)
     row = len(notes) + 3
-    for col, label in enumerate(("Cột", "Mô tả")):
+    for col, label in enumerate(("Column", "Description")):
         guide.write_string(row, col, label, header)
     for i, name in enumerate(names, start=row + 1):
         guide.write_string(i, 0, name, bold)
         guide.write_string(i, 1, handler.template_descriptions.get(name, ""), cell)
     row = row + len(names) + 3
-    guide.write_string(row, 0, "Dữ liệu mẫu", bold)
+    guide.write_string(row, 0, "Sample data", bold)
     for col, name in enumerate(names):
         guide.write_string(row + 1, col, name, header)
     for i, sample in enumerate(handler.template_sample_rows, start=row + 2):
