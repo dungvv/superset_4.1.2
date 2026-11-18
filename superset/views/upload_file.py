@@ -63,6 +63,7 @@ class UploadFileView(BaseSupersetView):
             "validate",
             "process",
             "history_list",
+            "partners",
             "download",
             "template",
         )
@@ -88,7 +89,7 @@ class UploadFileView(BaseSupersetView):
                 user_id=getattr(g.user, "id", None),
                 user_name=getattr(g.user, "username", None),
                 file_name=file_name,
-                duration_ms=int((time.monotonic() - started) * 1000),
+                duration=round(time.monotonic() - started, 1),
                 **kwargs,
             )
         except Exception:  # pylint: disable=broad-except
@@ -161,7 +162,7 @@ class UploadFileView(BaseSupersetView):
                 started,
                 fail_message=str(ex),
                 failure="process",
-                total_count=validation.total_rows,
+                total_txn=validation.total_rows,
             )
             return self.json_response({"message": __(str(ex))}, 502)
 
@@ -181,11 +182,17 @@ class UploadFileView(BaseSupersetView):
             }
         )
 
+    @expose("/api/partners", methods=("GET",))
+    @has_access_api
+    def partners(self) -> FlaskResponse:
+        """Partner names found in the history (choices of the Partner filter)."""
+        return self.json_response({"result": history.list_partners()})
+
     @expose("/api/history", methods=("GET",))
     @has_access_api
     def history_list(self) -> FlaskResponse:
         """The history, 10 per page. Optional filters: service, user (contains),
-        file_name (contains), status (success|fail) and a Check Date range (date_from / date_to as
+        file_name (contains), partner (contains), status (success|fail) and a Check Date range (date_from / date_to as
         YYYY-MM-DD, Vietnam days, both included)."""
         try:
             page = int(request.args.get("page", 1))
@@ -205,6 +212,7 @@ class UploadFileView(BaseSupersetView):
             service=(request.args.get("service") or "").strip() or None,
             user=(request.args.get("user") or "").strip() or None,
             file_name=(request.args.get("file_name") or "").strip() or None,
+            partner=(request.args.get("partner") or "").strip() or None,
             status=(request.args.get("status") or "").strip().lower() or None,
             date_from=date_from,
             date_to=date_to,

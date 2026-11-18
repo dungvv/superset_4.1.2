@@ -27,6 +27,11 @@ from superset.upload_file.validator import (
 )
 
 
+# THIRD_PARTY_DESCRIPTION of a transaction that was not found in the DWH (written
+# in red in the Excel file)
+NOT_FOUND_MESSAGE = "No transaction found"
+
+
 class ProcessError(Exception):
     """The file is valid but could not be processed (query failed, ...)."""
 
@@ -41,6 +46,22 @@ class ProcessResult:
     # One dict per row, keyed by the column of the service's detail table, with
     # typed values: they are what is saved in the DWH (see history.py)
     records: list[dict[str, Any]] = field(default_factory=list, repr=False)
+    # Columns shown on the page but not written in the downloaded files
+    hidden_in_file: tuple[str, ...] = ()
+    # Amount columns: written as numbers (thousand separator, no decimals,
+    # right aligned) in the Excel file
+    number_columns: tuple[str, ...] = ()
+
+    def for_file(self) -> "ProcessResult":
+        """The result as it is written in the CSV / Excel files."""
+        keep = [i for i, name in enumerate(self.columns) if name not in self.hidden_in_file]
+        return ProcessResult(
+            columns=[self.columns[i] for i in keep],
+            groups=[self.groups[i] for i in keep],
+            rows=[[row[i] for i in keep] for row in self.rows],
+            summary=self.summary,
+            number_columns=self.number_columns,
+        )
 
 
 class BusinessHandler(ABC):
@@ -65,13 +86,20 @@ class BusinessHandler(ABC):
     # Downloadable template: description of each column, sample rows and the
     # columns holding numbers (every other column is formatted as text)
     template_descriptions: dict[str, str]
+    # Same descriptions in Vietnamese (sheet "Hướng dẫn" of the template)
+    template_descriptions_vi: dict[str, str] = {}
+    # Columns that must be filled (marked with a red * in the template)
+    template_required_columns: frozenset[str] = frozenset()
     template_sample_rows: list[list[str]]
     template_number_columns: frozenset[str] = frozenset()
 
     def validate(self, filename: str, content: bytes) -> ValidationResult:
         """Return whether the uploaded file follows this type's template."""
         result = validate_template(
-            self.label, self.columns, read_rows(filename, content)
+            self.label,
+            self.columns,
+            read_rows(filename, content),
+            self.template_required_columns or None,
         )
         if result.valid:
             # Rows are edited in place: the preview shares them

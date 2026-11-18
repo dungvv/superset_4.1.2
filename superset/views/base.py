@@ -253,7 +253,7 @@ def get_environment_tag() -> dict[str, Any]:
 
 
 def with_upload_file_menu(menu: list[Any]) -> list[Any]:
-    """Add Settings > Manage > Upload file for the users who can use it.
+    """Add the top level "Upload File" tab (after Dashboards, Charts, Datasets, SQL).
 
     The page is not a FAB menu entry (that would need a second "menu access"
     permission): the entry is added here, from the single permission
@@ -266,14 +266,10 @@ def with_upload_file_menu(menu: list[Any]) -> list[Any]:
     entry = {
         "name": "Upload File",
         "icon": "fa-upload",
-        "label": __("Upload file"),
+        "label": __("Upload File"),
         "url": "/upload-file/",
     }
-    for item in menu:
-        if isinstance(item, dict) and item.get("name") == "Manage":
-            item["childs"] = [*item.get("childs", []), entry]
-            return menu
-    return [*menu, {"name": "Manage", "icon": "", "label": __("Manage"), "childs": [entry]}]
+    return [*menu, entry]
 
 
 def menu_data(user: User) -> dict[str, Any]:

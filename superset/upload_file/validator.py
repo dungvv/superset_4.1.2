@@ -25,7 +25,7 @@ import io
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Collection, Optional
 
 ALLOWED_EXTENSIONS = {"csv", "xlsx"}
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
@@ -75,27 +75,41 @@ def _cell_to_str(value: Any) -> str:
     return str(value).strip()
 
 
-_DMY_TIME_FORMATS = {"dd/mm/yyyy hh:mm:ss", "dd/mm/yyyy hh:mm"}
-
-
-def _is_dmy_hms_format(number_format: Any) -> bool:
-    """True for an Excel number format that shows ``dd/mm/yyyy hh:mm[:ss]``.
-
-    An Excel date is a number: with a day/month ambiguous format (e.g. ``m/d/yy``)
-    ``06/11/2026`` typed by a user can silently become the 11th of June. So a
-    date cell is only trusted when the column is displayed as day/month/year.
-    """
+def _date_order(number_format: Any) -> str:
+    """Order of the date parts an Excel number format shows: ``dmy``, ``mdy``,
+    ``ymd`` or ``""`` when it is not a date format."""
     if not isinstance(number_format, str):
-        return False
+        return ""
     text = re.sub(r"\[[^\]]*\]", "", number_format.split(";")[0])  # [$-409], [Red]...
-    text = re.sub(r'[\\"]', "", text)
-    return re.sub(r"\s+", " ", text).strip().lower() in _DMY_TIME_FORMATS
+    text = re.sub(r'[\\"]', "", text).lower()
+    # the time part (h:mm, mm:ss, AM/PM) must not be taken for the month
+    text = re.sub(r"h+:m+(:s+)?|m+:s+|am/pm|a/p", "", text)
+    parts = re.findall(r"[dmy]", text)
+    order = "".join(dict.fromkeys(parts))  # first appearance of d, m, y
+    return order if order in ("dmy", "mdy", "ymd") else ""
+
+
+def _xlsx_date_to_str(value: datetime, number_format: Any) -> str:
+    """An Excel date cell as ``dd/mm/yyyy HH:MM:SS``, read as the user sees it.
+
+    * shown day first (``dd/mm/yyyy``) or with the year first (``yyyy-mm-dd``):
+      the date is exact, as it is;
+    * shown month first (``m/d/yyyy h:mm``, what Excel gives to ``10/11/2026``
+      typed or pasted as text on an English computer): the user wrote it day
+      first, so the displayed numbers are read as day/month, that is the day and
+      the month of the stored date are swapped. When the swap is impossible
+      (the stored day is above 12: it was written month first on purpose) the
+      stored date is kept.
+    """
+    if _date_order(number_format) == "mdy" and value.day <= 12:
+        value = value.replace(month=value.day, day=value.month)
+    return value.strftime("%d/%m/%Y %H:%M:%S")
 
 
 def _xlsx_cell_to_str(cell: Any) -> str:
     value = cell.value
-    if isinstance(value, datetime) and _is_dmy_hms_format(cell.number_format):
-        return value.strftime("%d/%m/%Y %H:%M:%S")
+    if isinstance(value, datetime) and _date_order(cell.number_format):
+        return _xlsx_date_to_str(value, cell.number_format)
     return _cell_to_str(value)
 
 
@@ -171,34 +185,38 @@ def read_rows(filename: str, content: bytes) -> list[list[str]]:
 
 
 def validate_template(
-    label: str, expected: tuple[str, ...], rows: list[list[str]]
+    label: str,
+    expected: tuple[str, ...],
+    rows: list[list[str]],
+    required: Optional[Collection[str]] = None,
 ) -> ValidationResult:
-    """Check the header of ``rows`` against the template columns ``expected``."""
+    """Check the header of ``rows`` against the template columns ``expected``.
+
+    Only the ``required`` columns (all of them when omitted) must be in the
+    file. The other template columns are optional: a missing one is filled with
+    empty cells. Columns that are not in the template are ignored. The order
+    and the letter case of the columns are free, and a ``*`` at the end of a
+    name (the mark of a required column in the template) is ignored.
+    """
     if not rows:
         return ValidationResult(valid=False, errors=["File is empty"])
 
+    needed = list(expected if required is None else required)
     header, body = rows[0], rows[1:]
-    positions = [_norm(h) for h in header]
+    positions = [_norm(h).rstrip("*").strip() for h in header]
     expected_norm = [_norm(c) for c in expected]
 
-    missing = [c for c, n in zip(expected, expected_norm) if n not in positions]
-    extra = [
-        (h.strip() or "(empty)")
-        for h, n in zip(header, positions)
-        if n not in expected_norm
-    ]
-    duplicated = [c for c, n in zip(expected, expected_norm) if positions.count(n) > 1]
+    missing = [c for c in needed if _norm(c) not in positions]
+    duplicated = [c for c in needed if positions.count(_norm(c)) > 1]
 
     errors: list[str] = []
-    if len(header) != len(expected) or missing or extra or duplicated:
+    if missing or duplicated:
         errors.append(
-            f"File must have exactly {len(expected)} columns as in the "
+            f"File must have the columns {', '.join(needed)} as in the "
             f"{label} template"
         )
     if missing:
         errors.append(f"Missing: {', '.join(missing)}")
-    if extra:
-        errors.append(f"Unexpected: {', '.join(extra)}")
     if duplicated:
         errors.append(f"Duplicated: {', '.join(duplicated)}")
     if not errors and not body:
@@ -206,9 +224,15 @@ def validate_template(
     if errors:
         return ValidationResult(valid=False, errors=errors, columns=header)
 
-    # Re-order the columns to follow the template
-    indexes = [positions.index(n) for n in expected_norm]
-    ordered = [[row[i] if i < len(row) else "" for i in indexes] for row in body]
+    # Re-order the columns to follow the template (absent optional ones: empty)
+    indexes = [positions.index(n) if n in positions else None for n in expected_norm]
+    ordered = [
+        [
+            row[i] if i is not None and i < len(row) else ""
+            for i in indexes
+        ]
+        for row in body
+    ]
     return ValidationResult(
         valid=True,
         columns=list(expected),

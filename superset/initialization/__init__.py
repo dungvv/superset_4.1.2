@@ -409,7 +409,7 @@ class SupersetAppInitializer:  # pylint: disable=too-many-public-methods
         from superset.views.upload_file import UploadFileView
 
         # No FAB menu entry: that would need a second ("menu access") permission.
-        # The frontend adds Settings > Manage > Upload file for the roles that
+        # The frontend adds the top level Upload File tab for the roles that
         # hold "can access on UploadFile".
         appbuilder.add_view_no_menu(UploadFileView)
 

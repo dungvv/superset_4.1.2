@@ -39,8 +39,9 @@ from sqlalchemy import (
     DateTime,
     func,
     Integer,
-    LargeBinary,
     MetaData,
+    Numeric,
+    or_,
     select,
     String,
     Table,
@@ -56,6 +57,7 @@ PAGE_SIZE = 10
 VIETNAM_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 DISPLAY_FORMAT = "%d/%m/%Y %H:%M:%S"
 MAX_MESSAGE_LENGTH = 2000
+MAX_PARTNER_LENGTH = 512
 
 # Stored in upper case (as in the DDL); the API and the page use lower case.
 # A failed check says where it failed:
@@ -72,17 +74,19 @@ history_table = Table(
     Column("service", String(64), nullable=False),
     Column("user_id", Integer),
     Column("user_name", String(256)),
-    Column("checked_at", DateTime, nullable=False),  # Vietnam time
+    # Vietnam time, to the second (Oracle DATE)
+    Column("checked_at", DateTime, nullable=False),
     Column("status", String(16), nullable=False),
     Column("fail_message", String(MAX_MESSAGE_LENGTH)),
     Column("file_name", String(256)),
-    # Legacy: the output is rebuilt from the detail rows, so it stays empty
-    Column("result_data", LargeBinary),
-    Column("total_count", Integer),  # number of transactions of the file
-    Column("ts_count", Integer),
-    Column("ta_count", Integer),
-    Column("tf_count", Integer),
-    Column("duration_ms", Integer),
+    # Partners of the check, "BCEL,SOKXAY" (second part of CUSTOMER_NAME)
+    Column("partner_name", String(MAX_PARTNER_LENGTH)),
+    Column("total_txn", Integer),  # number of transactions of the file
+    Column("count_txn_ts", Integer),
+    Column("count_txn_ta", Integer),
+    Column("count_txn_tf", Integer),
+    # processing time of the check, in seconds (1 decimal)
+    Column("duration", Numeric(10, 1)),
     schema=DWH_SCHEMA,
 )
 
@@ -93,18 +97,18 @@ SORTABLE_COLUMNS = {
     "status": history_table.c.status,
     "fail_message": history_table.c.fail_message,
     "file_name": history_table.c.file_name,
-    "total": history_table.c.total_count,
-    "ts": history_table.c.ts_count,
-    "ta": history_table.c.ta_count,
-    "tf": history_table.c.tf_count,
-    "duration": history_table.c.duration_ms,
+    "total": history_table.c.total_txn,
+    "ts": history_table.c.count_txn_ts,
+    "ta": history_table.c.count_txn_ta,
+    "tf": history_table.c.count_txn_tf,
+    "duration": history_table.c.duration,
 }
 DEFAULT_ORDER = "check_date"
 
 
 def _now() -> datetime:
     """Current Vietnam time, without time zone (how it is stored)."""
-    return datetime.now(VIETNAM_TZ).replace(tzinfo=None)
+    return datetime.now(VIETNAM_TZ).replace(tzinfo=None, microsecond=0)
 
 
 def result_file_name(file_name: Optional[str], checked_at: datetime) -> str:
@@ -115,6 +119,20 @@ def result_file_name(file_name: Optional[str], checked_at: datetime) -> str:
     """
     base = (file_name or "result").rsplit(".", 1)[0]
     return f"{base}_result_{checked_at:%d%m%Y}"
+
+
+def _partner_column(result: Optional[ProcessResult]) -> Optional[str]:
+    """Distinct partners of the rows of the output, "BCEL,SOKXAY"."""
+    if result is None:
+        return None
+    names = {r.get("partner_name") for r in result.records if r.get("partner_name")}
+    joined = ""
+    for name in sorted(names, key=str.lower):
+        candidate = f"{joined},{name}" if joined else name
+        if len(candidate) > MAX_PARTNER_LENGTH:
+            break  # never cut a name in the middle
+        joined = candidate
+    return joined or None
 
 
 def _insert_returning_id(connection: Any, values: dict[str, Any]) -> int:
@@ -133,18 +151,18 @@ def add_entry(
     result: Optional[ProcessResult] = None,
     fail_message: Optional[str] = None,
     failure: str = "upload",
-    total_count: Optional[int] = None,
-    duration_ms: Optional[int] = None,
+    total_txn: Optional[int] = None,
+    duration: Optional[float] = None,
 ) -> int:
     """Record one check (and the rows of its output) and return its id.
 
     Without ``result`` the check failed: ``failure`` is ``"upload"`` when the
     file was refused, ``"process"`` when the file was valid but its processing
-    failed (``total_count`` is then the number of rows of the file).
+    failed (``total_txn`` is then the number of rows of the file).
     """
     if result is not None:
         status = STATUS_SUCCESS
-        total_count = len(result.rows)
+        total_txn = len(result.rows)
     else:
         status = STATUS_FAIL_PROCESS if failure == "process" else STATUS_FAIL_UPLOAD
     values = {
@@ -155,11 +173,12 @@ def add_entry(
         "status": status,
         "fail_message": (fail_message or "")[:MAX_MESSAGE_LENGTH] or None,
         "file_name": file_name[:256],
-        "total_count": total_count,
-        "ts_count": result.summary.get("TS", 0) if result is not None else None,
-        "ta_count": result.summary.get("TA", 0) if result is not None else None,
-        "tf_count": result.summary.get("TF", 0) if result is not None else None,
-        "duration_ms": duration_ms,
+        "partner_name": _partner_column(result),
+        "total_txn": total_txn,
+        "count_txn_ts": result.summary.get("TS", 0) if result is not None else None,
+        "count_txn_ta": result.summary.get("TA", 0) if result is not None else None,
+        "count_txn_tf": result.summary.get("TF", 0) if result is not None else None,
+        "duration": duration,
     }
     with dwh_connection(write=True) as connection:
         entry_id = _insert_returning_id(connection, values)
@@ -171,9 +190,12 @@ def add_entry(
     return entry_id
 
 
+def _escape_like(text: str) -> str:
+    return text.lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def _like_pattern(text: str) -> str:
-    escaped = text.lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-    return f"%{escaped}%"
+    return f"%{_escape_like(text)}%"
 
 
 def _filters(
@@ -183,8 +205,22 @@ def _filters(
     date_from: Optional[date],
     date_to: Optional[date],
     file_name: Optional[str],
+    partner: Optional[str] = None,
 ) -> list[Any]:
     conditions: list[Any] = []
+    wanted = [p.strip().lower() for p in (partner or "").split(",") if p.strip()]
+    if wanted:
+        # PARTNER_NAME holds the partners of the check, "BCEL,SOKXAY": keep the
+        # checks that have one of the wanted partners (IN on the list)
+        padded = func.lower("," + history_table.c.partner_name + ",")
+        conditions.append(
+            or_(
+                *[
+                    padded.like(f"%,{_escape_like(name)},%", escape="\\")
+                    for name in wanted
+                ]
+            )
+        )
     if service:
         conditions.append(history_table.c.service == service)
     if user:
@@ -228,9 +264,10 @@ def list_entries(
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
     file_name: Optional[str] = None,
+    partner: Optional[str] = None,
 ) -> tuple[int, list[dict[str, Any]]]:
     """One page of the (filtered) history, newest first by default."""
-    where = and_(*_filters(service, user, status, date_from, date_to, file_name))
+    where = and_(*_filters(service, user, status, date_from, date_to, file_name, partner))
     column = SORTABLE_COLUMNS.get(order_column, SORTABLE_COLUMNS[DEFAULT_ORDER])
     order = column.desc() if descending else column.asc()
     with dwh_connection() as connection:
@@ -246,11 +283,12 @@ def list_entries(
                 history_table.c.status,
                 history_table.c.fail_message,
                 history_table.c.file_name,
-                history_table.c.total_count,
-                history_table.c.ts_count,
-                history_table.c.ta_count,
-                history_table.c.tf_count,
-                history_table.c.duration_ms,
+                history_table.c.partner_name,
+                history_table.c.total_txn,
+                history_table.c.count_txn_ts,
+                history_table.c.count_txn_ta,
+                history_table.c.count_txn_tf,
+                history_table.c.duration,
             )
             .where(where)
             .order_by(order, history_table.c.id.desc())
@@ -269,23 +307,38 @@ def list_entries(
                 "status": _status_key(row.status),
                 "fail_message": row.fail_message or "",
                 "file_name": row.file_name or "",
+                "partner_name": partner_names(row.partner_name),
                 "result_file_name": (
                     result_file_name(row.file_name, row.checked_at) if success else ""
                 ),
-                "total": _int_or_none(row.total_count),
-                "ts": _int_or_none(row.ts_count),
-                "ta": _int_or_none(row.ta_count),
-                "tf": _int_or_none(row.tf_count),
+                "total": _int_or_none(row.total_txn),
+                "ts": _int_or_none(row.count_txn_ts),
+                "ta": _int_or_none(row.count_txn_ta),
+                "tf": _int_or_none(row.count_txn_tf),
                 # seconds, 1 decimal
                 "duration": (
-                    round(float(row.duration_ms) / 1000, 1)
-                    if row.duration_ms is not None
-                    else None
+                    round(float(row.duration), 1) if row.duration is not None else None
                 ),
                 "can_download": success,
             }
         )
     return int(total or 0), entries
+
+
+def partner_names(value: Optional[str]) -> list[str]:
+    """The partners saved in the PARTNER_NAME column ("BCEL,SOKXAY")."""
+    return [name for name in (value or "").split(",") if name]
+
+
+def list_partners() -> list[str]:
+    """Every partner name found in the history, for the filter of the page."""
+    with dwh_connection() as connection:
+        values = connection.execute(
+            select(history_table.c.partner_name)
+            .where(history_table.c.partner_name.is_not(None))
+            .distinct()
+        ).scalars()
+        return sorted({n for v in values for n in partner_names(v)}, key=str.lower)
 
 
 def _status_key(status: str) -> str:
@@ -308,9 +361,9 @@ def get_result(entry_id: int) -> Optional[tuple[str, ProcessResult]]:
                 history_table.c.file_name,
                 history_table.c.checked_at,
                 history_table.c.status,
-                history_table.c.ts_count,
-                history_table.c.ta_count,
-                history_table.c.tf_count,
+                history_table.c.count_txn_ts,
+                history_table.c.count_txn_ta,
+                history_table.c.count_txn_tf,
             ).where(history_table.c.id == entry_id)
         ).first()
         if head is None or head.status != STATUS_SUCCESS:
@@ -331,8 +384,8 @@ def get_result(entry_id: int) -> Optional[tuple[str, ProcessResult]]:
         ]
     result = handler.result_from_records(records)
     result.summary = {
-        "TS": _int_or_none(head.ts_count) or 0,
-        "TA": _int_or_none(head.ta_count) or 0,
-        "TF": _int_or_none(head.tf_count) or 0,
+        "TS": _int_or_none(head.count_txn_ts) or 0,
+        "TA": _int_or_none(head.count_txn_ta) or 0,
+        "TF": _int_or_none(head.count_txn_tf) or 0,
     }
     return result_file_name(head.file_name, head.checked_at), result

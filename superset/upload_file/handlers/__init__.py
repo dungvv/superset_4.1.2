@@ -29,3 +29,7 @@ def get_handler(value: str | None) -> BusinessHandler | None:
 
 def list_business_types() -> list[dict[str, str]]:
     return [{"value": h.value, "label": h.label} for h in _HANDLERS.values()]
+
+
+def list_handlers() -> list[BusinessHandler]:
+    return list(_HANDLERS.values())
